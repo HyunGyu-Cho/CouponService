@@ -1,19 +1,11 @@
 package com.example.couponservice.coupon.exception;
 
 import com.example.couponservice.global.exception.ErrorCode;
+
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 
-/*
-    INVALID_NAME	400	COUPON_001	잘못된 이름
-    INVALID_TOTAL_QUANTITY	400	COUPON_002	잘못된 전체 수량
-    INVALID_PERIOD	400	COUPON_003	잘못된 발급 기간
-    ISSUED_AT_REQUIRED	400	COUPON_004	발급 시간 누락
-    NOT_STARTED	409	COUPON_005	발급 시작 전
-    EXPIRED	409	COUPON_006	발급 기간 종료
-    SOLD_OUT	409	COUPON_007	재고 소진
-*/
 @Getter
 @RequiredArgsConstructor
 public enum CouponErrorCode implements ErrorCode {
@@ -57,6 +49,24 @@ public enum CouponErrorCode implements ErrorCode {
             HttpStatus.CONFLICT,
             "COUPON_007",
             "쿠폰 재고가 모두 소진되었습니다."
+    ),
+
+    COUPON_NOT_FOUND(
+            HttpStatus.NOT_FOUND,
+            "COUPON_008",
+            "쿠폰을 찾을 수 없습니다."
+    ),
+
+    INVALID_USER_ID(
+            HttpStatus.BAD_REQUEST,
+            "COUPON_009",
+            "사용자 ID는 1 이상이어야 합니다."
+    ),
+
+    DUPLICATE_ISSUE(
+            HttpStatus.CONFLICT,
+            "COUPON_010",
+            "이미 발급받은 쿠폰입니다."
     );
 
     private final HttpStatus httpStatus;
