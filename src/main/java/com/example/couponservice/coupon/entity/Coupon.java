@@ -1,5 +1,7 @@
 package com.example.couponservice.coupon.entity;
 
+import com.example.couponservice.coupon.exception.CouponErrorCode;
+import com.example.couponservice.coupon.exception.CouponException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -81,53 +83,53 @@ public class Coupon {
     // 쿠폰 이름이 비어 있는지 검증한다.
     private static void validateName(String name) {
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("쿠폰 이름은 비어 있을 수 없습니다.");
+            throw new CouponException(CouponErrorCode.INVALID_NAME);
         }
     }
 
     // 쿠폰 전체 수량이 1개 이상인지 검증한다.
     private static void validateTotalQuantity(int totalQuantity) {
         if (totalQuantity <= 0) {
-            throw new IllegalArgumentException("쿠폰 전체 수량은 1개 이상이어야 합니다.");
+            throw new CouponException(CouponErrorCode.INVALID_TOTAL_QUANTITY);
         }
     }
 
     // 쿠폰 발급 시작 시간이 종료 시간보다 이전인지 검증한다.
     private static void validatePeriod(
             LocalDateTime startAt,
-            LocalDateTime endAt
+        LocalDateTime endAt
     ) {
         if (startAt == null || endAt == null) {
-            throw new IllegalArgumentException("쿠폰 발급 시작 시간과 종료 시간은 필수입니다.");
+            throw new CouponException(CouponErrorCode.INVALID_PERIOD);
         }
 
         if (!startAt.isBefore(endAt)) {
-            throw new IllegalArgumentException("쿠폰 발급 시작 시간은 종료 시간보다 이전이어야 합니다.");
+            throw new CouponException(CouponErrorCode.INVALID_PERIOD);
         }
     }
 
     // 쿠폰 발급 시간이 입력되었는지 검증한다.
     private static void validateIssuedAt(LocalDateTime issuedAt) {
         if (issuedAt == null) {
-            throw new IllegalArgumentException("쿠폰 발급 시간은 필수입니다.");
+            throw new CouponException(CouponErrorCode.ISSUED_AT_REQUIRED);
         }
     }
 
     // 요청한 시간이 쿠폰 발급 가능 기간에 포함되는지 검증한다.
     private void validateIssuablePeriod(LocalDateTime issuedAt) {
         if (issuedAt.isBefore(startAt)) {
-            throw new IllegalStateException("쿠폰 발급 기간이 시작되지 않았습니다.");
+            throw new CouponException(CouponErrorCode.NOT_STARTED);
         }
 
         if (issuedAt.isAfter(endAt)) {
-            throw new IllegalStateException("쿠폰 발급 기간이 종료되었습니다.");
+            throw new CouponException(CouponErrorCode.EXPIRED);
         }
     }
 
     // 발급할 수 있는 쿠폰 재고가 남아 있는지 검증한다.
     private void validateRemainingQuantity() {
         if (remainingQuantity <= 0) {
-            throw new IllegalStateException("쿠폰 재고가 모두 소진되었습니다.");
+            throw new CouponException(CouponErrorCode.SOLD_OUT);
         }
     }
 }
