@@ -7,19 +7,22 @@ import com.example.couponservice.coupon.exception.CouponException;
 import com.example.couponservice.coupon.repository.CouponIssueRepository;
 import com.example.couponservice.coupon.repository.CouponRepository;
 
+import com.example.couponservice.coupon.service.CouponIssueUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
-public class V1CouponIssueService {
+public class V1CouponIssueService implements CouponIssueUseCase {
 
     private final CouponRepository couponRepository;
     private final CouponIssueRepository couponIssueRepository;
 
+    @Override
     @Transactional
     public CouponIssue issueCoupon(
             Long couponId,
