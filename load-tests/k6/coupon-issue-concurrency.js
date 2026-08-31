@@ -2,9 +2,9 @@ import http from 'k6/http'; // k6에서 HTTP 요청을 보내는 기능
 import exec from 'k6/execution'; // 현재 실행 중인 가상 사용자와 반복 횟수 등의 정보 가져옴
 import { Counter } from 'k6/metrics'; // 특정 사건이 몇 번 발생했는지 직접 세는 기능
 
-const createdCount = new Counter('coupon_issue_created');
-const conflictCount = new Counter('coupon_issue_conflict');
-const unexpectedCount = new Counter('coupon_issue_unexpected');
+const createdCount = new Counter('coupon_issue_created'); // 정상처리
+const conflictCount = new Counter('coupon_issue_conflict'); // 충돌
+const unexpectedCount = new Counter('coupon_issue_unexpected'); // 예측 불가
 
 const baseUrl = __ENV.BASE_URL || 'http://localhost:8080';
 const couponId = __ENV.COUPON_ID;

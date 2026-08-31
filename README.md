@@ -140,7 +140,8 @@ V1의 첫 동시성 실험은 쿠폰 100장을 만들고 1,000명이 동시에 �
 - Spring Data JPA
 - MariaDB 12.3 / MariaDB Connector/J
 - Validation, Actuator
-- Redis, Kafka, Batch, Cache, Flyway — 이후 단계에서 사용
+- Flyway
+- Redis, Kafka, Batch, Cache — 이후 단계에서 사용
 - JUnit 5, AssertJ
 - k6
 
@@ -170,11 +171,16 @@ $env:DB_PASSWORD="MariaDB 비밀번호"
 ./gradlew.bat bootRun
 ```
 
-현재 Flyway와 Batch 자동 실행은 비활성화되어 있습니다. Redis와 Kafka도 아직 실제 발급 흐름에 사용하지 않습니다.
+Flyway는 스키마 검증과 마이그레이션에 사용하며 Batch 자동 실행은 비활성화되어 있습니다.
+Redis와 Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.
 
 ## 현재 진행 상태
 
-V1의 단순 동기 쿠폰 API 구현을 완료했습니다. 빌드·실행 확인과 동시성 실험은 별도로 진행합니다.
+V1의 동시성 문제를 재현한 뒤 V2 비관적 락 구현과 100 VU 검증을 완료했습니다.
+V2 설계와 실험 결과는 다음 문서에 기록했습니다.
+
+- [V2 개발 가이드](docs/v2/development-guide.md)
+- [V2 부하 테스트 결과](docs/v2/load-test-result.md)
 
 완료:
 
@@ -185,24 +191,28 @@ V1의 단순 동기 쿠폰 API 구현을 완료했습니다. 빌드·실행 확�
 - 발급 기간, 재고, 중복 발급에 대한 도메인 및 DB 방어
 - LAZY 연관관계를 함께 조회하는 사용자별 보유 쿠폰 JPQL
 - V1 API 계약과 개발 가이드
+- `PESSIMISTIC_WRITE`를 적용한 V2 쿠폰 행 잠금 조회
+- 설정값으로 V1과 V2 발급 구현체 선택
+- 실행 SQL의 `FOR UPDATE` 확인
+- 재고 100개와 100 VU 조건에서 100건 발급, unexpected 0건 확인
 
 보류:
 
-- 사용자가 직접 수행할 빌드와 API 실행 확인
 - `CouponTest`의 `@Disabled` 테스트 구현
-- k6 동시성 실험과 결과 기록
+- V2 유효 실행의 DB 사후 집계값 보존
+- 1,000 VU 순간 연결에서 발생한 TCP 연결 거절과 HTTP 진입 용량의 별도 분석
 
 아직 구현하지 않음:
 
-- V2 비관적 락과 이후의 모든 최적화 단계
+- V3 Atomic UPDATE와 이후의 모든 최적화 단계
 
 ## 다음 작업
 
-1. 사용자가 V1 빌드와 주요 API 실행을 확인합니다.
-2. 현재 상태에 `v1-baseline` Git 태그를 남깁니다.
-3. 쿠폰 100장에 1,000명이 요청하는 k6 테스트로 동시성 문제를 재현합니다.
-4. 실험 결과를 `문제 -> 가설 -> 변경 -> 결과 -> 판단` 형식으로 기록합니다.
-5. 문제 재현 후 V2 비관적 락 구현을 시작합니다.
+1. V2 코드와 문서를 커밋하고 `v2-pessimistic-lock` 태그를 남깁니다.
+2. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
+3. 조건부 Atomic UPDATE를 사용하는 V3 발급 방식을 설계합니다.
+4. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정합니다.
+5. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 최종 판단합니다.
 
 ## 개발 원칙
 
