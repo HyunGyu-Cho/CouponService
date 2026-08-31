@@ -23,35 +23,35 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusinessException(
             BusinessException exception
     ) {
-        return createErrorResponseEntity(exception.getErrorCode());
+        return toErrorResponseEntity(exception.getErrorCode());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentNotValidException(
             MethodArgumentNotValidException exception
     ) {
-        return createErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
+        return toErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<ErrorResponse> handleMethodValidationException(
             HandlerMethodValidationException exception
     ) {
-        return createErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
+        return toErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
             HttpMessageNotReadableException exception
     ) {
-        return createErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
+        return toErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleMethodArgumentTypeMismatchException(
             MethodArgumentTypeMismatchException exception
     ) {
-        return createErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
+        return toErrorResponseEntity(CommonErrorCode.INVALID_REQUEST);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)
@@ -59,11 +59,11 @@ public class GlobalExceptionHandler {
             DataIntegrityViolationException exception
     ) {
         if (isCouponIssueUniqueConstraintViolation(exception)) {
-            return createErrorResponseEntity(CouponErrorCode.DUPLICATE_ISSUE);
+            return toErrorResponseEntity(CouponErrorCode.DUPLICATE_ISSUE);
         }
 
         log.error("예상하지 못한 데이터 무결성 오류가 발생했습니다.", exception);
-        return createErrorResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
+        return toErrorResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
     }
 
     @ExceptionHandler(Exception.class)
@@ -71,7 +71,7 @@ public class GlobalExceptionHandler {
             Exception exception
     ) {
         log.error("예상하지 못한 오류가 발생했습니다.", exception);
-        return createErrorResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
+        return toErrorResponseEntity(CommonErrorCode.INTERNAL_SERVER_ERROR);
     }
 
     private static boolean isCouponIssueUniqueConstraintViolation(
@@ -92,7 +92,7 @@ public class GlobalExceptionHandler {
         return false;
     }
 
-    private static ResponseEntity<ErrorResponse> createErrorResponseEntity(
+    private static ResponseEntity<ErrorResponse> toErrorResponseEntity(
             ErrorCode errorCode
     ) {
         ErrorResponse response = new ErrorResponse(

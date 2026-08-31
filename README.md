@@ -174,41 +174,35 @@ $env:DB_PASSWORD="MariaDB 비밀번호"
 
 ## 현재 진행 상태
 
-현재 V1의 도메인 기반을 구현하고 있습니다.
+V1의 단순 동기 쿠폰 API 구현을 완료했습니다. 빌드·실행 확인과 동시성 실험은 별도로 진행합니다.
 
 완료:
 
-- `Coupon` JPA 엔티티
-- 정적 팩토리 메서드를 통한 쿠폰 생성 규칙
-- 발급 기간 및 잔여 수량을 검증하는 `issue()`
-- `ErrorCode`와 `BusinessException` 공통 예외 기반
-- `CouponErrorCode` 7종과 `CouponException`
-- `ErrorResponse` 응답 형태
-- `GlobalExceptionHandler` 클래스 골격
-- `CouponTest`의 정상 생성, 이름 누락, 수량 0 테스트
+- `Coupon`, `CouponIssue` JPA 엔티티와 `(coupon_id, user_id)` UNIQUE 제약
+- 쿠폰 생성, 단건 조회, 발급, 사용자별 보유 쿠폰 조회 API
+- DTO Validation과 안전한 공통 오류 응답
+- V1 동기 발급 Service와 트랜잭션 경계
+- 발급 기간, 재고, 중복 발급에 대한 도메인 및 DB 방어
+- LAZY 연관관계를 함께 조회하는 사용자별 보유 쿠폰 JPQL
+- V1 API 계약과 개발 가이드
 
 보류:
 
-- `CouponTest`의 나머지 9개 테스트는 `@Disabled` 상태
-- `GlobalExceptionHandler`의 실제 예외 처리 메서드
+- 사용자가 직접 수행할 빌드와 API 실행 확인
+- `CouponTest`의 `@Disabled` 테스트 구현
+- k6 동시성 실험과 결과 기록
 
 아직 구현하지 않음:
 
-- `CouponIssue` 엔티티와 UNIQUE 제약
-- Repository, Service, Controller
-- 쿠폰 생성·조회·발급 API
-- k6 동시성 테스트
-- 비관적 락 이후의 모든 최적화 단계
+- V2 비관적 락과 이후의 모든 최적화 단계
 
 ## 다음 작업
 
-1. `CouponIssue` 엔티티를 구현하고 `(coupon_id, user_id)` UNIQUE 제약을 추가합니다.
-2. Coupon/CouponIssue Repository를 구현합니다.
-3. V1 발급 Service와 트랜잭션 경계를 구현합니다.
-4. REST Controller와 DTO를 구현합니다.
-5. `GlobalExceptionHandler`에서 `BusinessException`을 `ErrorResponse`로 변환합니다.
-6. V1 완료 전 `@Disabled` 단위 테스트를 구현합니다.
-7. 쿠폰 100장에 1,000명이 요청하는 k6 테스트로 동시성 문제를 재현합니다.
+1. 사용자가 V1 빌드와 주요 API 실행을 확인합니다.
+2. 현재 상태에 `v1-baseline` Git 태그를 남깁니다.
+3. 쿠폰 100장에 1,000명이 요청하는 k6 테스트로 동시성 문제를 재현합니다.
+4. 실험 결과를 `문제 -> 가설 -> 변경 -> 결과 -> 판단` 형식으로 기록합니다.
+5. 문제 재현 후 V2 비관적 락 구현을 시작합니다.
 
 ## 개발 원칙
 

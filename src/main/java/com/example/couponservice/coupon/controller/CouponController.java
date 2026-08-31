@@ -4,6 +4,7 @@ import com.example.couponservice.coupon.dto.request.CouponCreateRequest;
 import com.example.couponservice.coupon.dto.response.CouponResponse;
 import com.example.couponservice.coupon.entity.Coupon;
 import com.example.couponservice.coupon.service.CouponService;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -20,9 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 @RequestMapping("/api/coupons")
 public class CouponController {
+
     private final CouponService couponService;
 
-    // 쿠폰 생성 함수
     @PostMapping
     public ResponseEntity<CouponResponse> createCoupon(
             @Valid @RequestBody CouponCreateRequest request
@@ -41,7 +42,6 @@ public class CouponController {
                 .body(response);
     }
 
-    // 쿠폰 단건 조회 함수
     @GetMapping("/{couponId}")
     public ResponseEntity<CouponResponse> getCoupon(
             @PathVariable @Positive Long couponId
@@ -49,9 +49,6 @@ public class CouponController {
         Coupon coupon = couponService.getCoupon(couponId);
         CouponResponse response = CouponResponse.from(coupon);
 
-        return ResponseEntity
-                .status(HttpStatus.OK)
-                .body(response);
-        // return ResponseEntity.ok(response);
+        return ResponseEntity.ok(response);
     }
 }

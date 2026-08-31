@@ -4,6 +4,7 @@ import com.example.couponservice.coupon.dto.request.CouponIssueRequest;
 import com.example.couponservice.coupon.dto.response.CouponIssueResponse;
 import com.example.couponservice.coupon.entity.CouponIssue;
 import com.example.couponservice.coupon.service.CouponIssueUseCase;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +23,6 @@ public class CouponIssueController {
 
     private final CouponIssueUseCase couponIssueUseCase;
 
-    // 쿠폰 발급
     @PostMapping("/{couponId}/issue")
     public ResponseEntity<CouponIssueResponse> issueCoupon(
             @PathVariable @Positive Long couponId,

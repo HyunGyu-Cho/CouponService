@@ -4,7 +4,6 @@ import com.example.couponservice.coupon.entity.Coupon;
 
 import java.time.LocalDateTime;
 
-// 쿠폰 생성과 단건 조회에서 함께 사용
 public record CouponResponse(
         Long couponId,
         String name,

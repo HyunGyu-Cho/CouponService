@@ -6,8 +6,8 @@ import com.example.couponservice.coupon.exception.CouponErrorCode;
 import com.example.couponservice.coupon.exception.CouponException;
 import com.example.couponservice.coupon.repository.CouponIssueRepository;
 import com.example.couponservice.coupon.repository.CouponRepository;
-
 import com.example.couponservice.coupon.service.CouponIssueUseCase;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
