@@ -2,7 +2,6 @@ package com.example.couponservice.coupon.entity;
 
 import com.example.couponservice.coupon.exception.CouponErrorCode;
 import com.example.couponservice.coupon.exception.CouponException;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -65,12 +64,17 @@ public class Coupon {
     ) {
         validateName(name);
         validateTotalQuantity(totalQuantity);
-        validateIssuePeriod(startAt, endAt);
+        validatePeriod(startAt, endAt);
 
         return new Coupon(name, totalQuantity, startAt, endAt);
     }
 
     public void issue(LocalDateTime issuedAt) {
+        validateIssuable(issuedAt);
+        remainingQuantity--;
+    }
+
+    public void validateIssuable(LocalDateTime issuedAt) {
         validateIssuedAt(issuedAt);
         validateIssuablePeriod(issuedAt);
         validateRemainingQuantity();
@@ -90,7 +94,7 @@ public class Coupon {
         }
     }
 
-    private static void validateIssuePeriod(
+    private static void validatePeriod(
             LocalDateTime startAt,
             LocalDateTime endAt
     ) {

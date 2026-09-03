@@ -42,7 +42,7 @@ public class V2CouponIssueService implements CouponIssueUseCase {
 
         // validate 함수들 검증한 뒤에
         // remainingCount를 하나 감소시킨다
-        coupon.issue(issuedAt);
+        coupon.validateIssuable(issuedAt);
 
         // CouponIssue 만들고
         CouponIssue couponIssue = CouponIssue.create(
