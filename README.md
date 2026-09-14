@@ -41,8 +41,10 @@ POST /api/coupons/{couponId}/issue
 GET  /api/users/{userId}/coupons
 ```
 
-- 초기 동기 발급: `200 OK` 또는 `201 Created`
-- Kafka 비동기 발급: DB 저장 전에 응답한다면 `202 Accepted`
+- 동기 발급(V1~V3): 발급 이력 저장 후 `201 Created`
+- Kafka 비동기 발급: DB 저장 전에 응답한다면 `202 Accepted`와 별도 계약
+
+요청·응답 JSON과 오류 코드의 정본은 [API 계약](docs/api.md)입니다. 구현 버전이 바뀌어도 이 계약은 유지합니다.
 
 ## 데이터 모델
 
@@ -163,13 +165,22 @@ CREATE DATABASE coupon_service
     COLLATE utf8mb4_unicode_ci;
 ```
 
-PowerShell 환경변수 설정 및 실행:
+연결 정보는 환경변수 또는 저장소 루트의 `.env` 파일로 주입합니다. `.env`는 커밋하지 않습니다.
+
+```text
+DB_USERNAME=root
+DB_PASSWORD=MariaDB 비밀번호
+```
+
+PowerShell에서 환경변수로 직접 지정할 수도 있습니다:
 
 ```powershell
 $env:DB_USERNAME="root"
 $env:DB_PASSWORD="MariaDB 비밀번호"
 ./gradlew.bat bootRun
 ```
+
+발급 구현 버전은 `application.properties`의 `coupon.issue.version`(`v1`, `v2`, `v3`)으로 선택합니다.
 
 Flyway는 스키마 검증과 마이그레이션에 사용하며 Batch 자동 실행은 비활성화되어 있습니다.
 Redis와 Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.
@@ -190,29 +201,56 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 - V1 동기 발급 Service와 트랜잭션 경계
 - 발급 기간, 재고, 중복 발급에 대한 도메인 및 DB 방어
 - LAZY 연관관계를 함께 조회하는 사용자별 보유 쿠폰 JPQL
-- V1 API 계약과 개발 가이드
+- 공통 API 계약, 공통 개발 가이드, V1 개발 가이드
 - `PESSIMISTIC_WRITE`를 적용한 V2 쿠폰 행 잠금 조회
 - 설정값으로 V1과 V2 발급 구현체 선택
 - 실행 SQL의 `FOR UPDATE` 확인
 - 재고 100개와 100 VU 조건에서 100건 발급, unexpected 0건 확인
 
+완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`으로 보존했습니다.
+
+진행 중 (V3, 미검증):
+
+- `V3CouponIssueService`와 조건부 UPDATE 쿼리 초안이 커밋돼 있지만 테스트와 부하 실험을 거치지 않았습니다.
+- 초안에서 발견한 문제와 수정 계획은 [V3 개발 가이드](docs/v3/development-guide.md)에 기록했습니다.
+- V3 초안 작성 과정에서 `Coupon.validateIssuable()`이 재고를 감소시키도록 바뀌어 V1·V2 코드가 개발 가이드의 발급 흐름과 어긋난 상태입니다. V3 정리와 함께 되돌립니다.
+
 보류:
 
-- `CouponTest`의 `@Disabled` 테스트 구현
+- `CouponTest`의 `@Disabled` 테스트 9개 구현
+- 발급 흐름의 동시성 자동 테스트 (현재는 k6 수동 실행에만 의존)
 - V2 유효 실행의 DB 사후 집계값 보존
 - 1,000 VU 순간 연결에서 발생한 TCP 연결 거절과 HTTP 진입 용량의 별도 분석
 
 아직 구현하지 않음:
 
-- V3 Atomic UPDATE와 이후의 모든 최적화 단계
+- V4 Redis 이후의 모든 단계
 
 ## 다음 작업
 
-1. V2 코드와 문서를 커밋하고 `v2-pessimistic-lock` 태그를 남깁니다.
-2. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
-3. 조건부 Atomic UPDATE를 사용하는 V3 발급 방식을 설계합니다.
-4. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정합니다.
-5. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 최종 판단합니다.
+1. `Coupon.validateIssuable()`과 `issue()`의 책임을 분리하고 V1·V2가 `issue()`를 쓰도록 되돌립니다.
+2. V3 발급 순서를 "중복 확인 → 조건부 UPDATE → 이력 저장"으로 고치고 실패 원인 판별이 재고를 바꾸지 않게 합니다.
+3. `CouponTest`의 `@Disabled` 테스트를 채우고 V1·V2·V3 동시성 자동 테스트를 추가합니다.
+4. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
+5. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
+6. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 판단한 뒤 `v3-atomic-update` 태그를 남깁니다.
+
+## 검사 장치
+
+코드와 문서가 어긋난 채 남지 않도록 세 순간에 자동 검사가 돕니다. 상세 규칙은 [AGENTS.md](AGENTS.md)의 "작업 종료 조건"에 있습니다.
+
+| 순간 | 실행 주체 | 스크립트 |
+|---|---|---|
+| Claude Code 턴 종료 | `.claude/settings.json` Stop 훅 | `scripts/check-turn.sh` |
+| `git commit` | `.githooks/commit-msg` | `scripts/check-commit.sh` |
+| GitHub push, PR | `.github/workflows/checks.yml` | 위 스크립트 + 테스트 + 링크 검사 |
+| `vN-*` 태그 push | 같은 워크플로 | `scripts/check-stage.sh vN` |
+
+직접 커밋하는 환경에서는 한 번만 아래를 실행해 커밋 검사를 설치합니다. Claude Code 세션은 자동으로 설치합니다.
+
+```bash
+git config core.hooksPath .githooks
+```
 
 ## 개발 원칙
 

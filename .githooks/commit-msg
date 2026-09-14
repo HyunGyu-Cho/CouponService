@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# git commit-msg 훅. 설치: git config core.hooksPath .githooks
+# (Claude Code 세션은 scripts/session-start.sh 가 자동으로 설치한다)
+exec bash "$(git rev-parse --show-toplevel)/scripts/check-commit.sh" "$1"

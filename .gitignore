@@ -37,3 +37,5 @@ out/
 .vscode/
 
 .env
+# Claude Code 세션 상태 (검사 기준점)
+.claude/state/
