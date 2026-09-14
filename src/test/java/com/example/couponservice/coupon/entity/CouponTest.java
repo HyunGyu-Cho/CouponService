@@ -3,7 +3,6 @@ package com.example.couponservice.coupon.entity;
 import com.example.couponservice.coupon.exception.CouponErrorCode;
 import com.example.couponservice.coupon.exception.CouponException;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -15,100 +14,139 @@ class CouponTest {
 
     private static final LocalDateTime START_AT = LocalDateTime.of(2026, 8, 30, 10, 0);
     private static final LocalDateTime END_AT = LocalDateTime.of(2026, 8, 31, 10, 0);
+    private static final LocalDateTime IN_PERIOD = LocalDateTime.of(2026, 8, 30, 15, 0);
+
+    private static Coupon coupon(int totalQuantity) {
+        return Coupon.create("10% discount coupon", totalQuantity, START_AT, END_AT);
+    }
+
+    private static void assertCouponError(
+            Runnable action,
+            CouponErrorCode expected
+    ) {
+        assertThatThrownBy(action::run).isInstanceOfSatisfying(
+                CouponException.class,
+                exception -> assertThat(exception.getErrorCode()).isEqualTo(expected)
+        );
+    }
 
     @Test
     void createsCouponWithInitialRemainingQuantity() {
-        String name = "10% discount coupon";
-        int totalQuantity = 100;
+        Coupon coupon = coupon(100);
 
-        Coupon coupon = Coupon.create(
-                name,
-                totalQuantity,
-                START_AT,
-                END_AT
-        );
-
-        assertThat(coupon.getName()).isEqualTo(name);
-        assertThat(coupon.getTotalQuantity()).isEqualTo(totalQuantity);
-        assertThat(coupon.getRemainingQuantity()).isEqualTo(totalQuantity);
+        assertThat(coupon.getName()).isEqualTo("10% discount coupon");
+        assertThat(coupon.getTotalQuantity()).isEqualTo(100);
+        assertThat(coupon.getRemainingQuantity()).isEqualTo(100);
     }
 
     @Test
     void throwsInvalidNameWhenCouponNameIsBlank() {
-        String name = " ";
-        int totalQuantity = 100;
-
-        assertThatThrownBy(() -> Coupon.create(
-                name,
-                totalQuantity,
-                START_AT,
-                END_AT
-        )).isInstanceOfSatisfying(
-                CouponException.class,
-                exception -> assertThat(exception.getErrorCode())
-                        .isEqualTo(CouponErrorCode.INVALID_NAME)
+        assertCouponError(
+                () -> Coupon.create(" ", 100, START_AT, END_AT),
+                CouponErrorCode.INVALID_NAME
         );
     }
 
     @Test
     void throwsInvalidTotalQuantityWhenQuantityIsZero() {
-        String name = "10% discount coupon";
-        int totalQuantity = 0;
+        assertCouponError(() -> coupon(0), CouponErrorCode.INVALID_TOTAL_QUANTITY);
+    }
 
-        assertThatThrownBy(() -> Coupon.create(
-                name,
-                totalQuantity,
-                START_AT,
-                END_AT
-        )).isInstanceOfSatisfying(
-                CouponException.class,
-                exception -> assertThat(exception.getErrorCode())
-                        .isEqualTo(CouponErrorCode.INVALID_TOTAL_QUANTITY)
+    @Test
+    void throwsInvalidTotalQuantityWhenQuantityIsNegative() {
+        assertCouponError(() -> coupon(-1), CouponErrorCode.INVALID_TOTAL_QUANTITY);
+    }
+
+    @Test
+    void throwsInvalidPeriodWhenStartAtIsAfterEndAt() {
+        assertCouponError(
+                () -> Coupon.create("coupon", 100, END_AT, START_AT),
+                CouponErrorCode.INVALID_PERIOD
         );
     }
 
-    @Disabled("음수 수량 예외 코드 테스트 작성 예정")
-    @Test
-    void throwsInvalidTotalQuantityWhenQuantityIsNegative() {
-    }
-
-    @Disabled("발급 시작 시간이 종료 시간보다 늦은 경우 테스트 작성 예정")
-    @Test
-    void throwsInvalidPeriodWhenStartAtIsAfterEndAt() {
-    }
-
-    @Disabled("발급 시작 시간과 종료 시간이 같은 경우 테스트 작성 예정")
     @Test
     void throwsInvalidPeriodWhenStartAtEqualsEndAt() {
+        assertCouponError(
+                () -> Coupon.create("coupon", 100, START_AT, START_AT),
+                CouponErrorCode.INVALID_PERIOD
+        );
     }
 
-    @Disabled("쿠폰 정상 발급 테스트 작성 예정")
     @Test
     void decreasesRemainingQuantityWhenCouponIsIssued() {
+        Coupon coupon = coupon(100);
+
+        coupon.issue(IN_PERIOD);
+
+        assertThat(coupon.getRemainingQuantity()).isEqualTo(99);
     }
 
-    @Disabled("쿠폰 발급 시간 누락 테스트 작성 예정")
     @Test
     void throwsIssuedAtRequiredWhenIssuedAtIsNull() {
+        assertCouponError(() -> coupon(100).issue(null), CouponErrorCode.ISSUED_AT_REQUIRED);
     }
 
-    @Disabled("쿠폰 발급 시작 전 요청 테스트 작성 예정")
     @Test
     void throwsNotStartedWhenIssuedBeforeStartAt() {
+        assertCouponError(
+                () -> coupon(100).issue(START_AT.minusSeconds(1)),
+                CouponErrorCode.NOT_STARTED
+        );
     }
 
-    @Disabled("쿠폰 발급 종료 후 요청 테스트 작성 예정")
     @Test
     void throwsExpiredWhenIssuedAfterEndAt() {
+        assertCouponError(
+                () -> coupon(100).issue(END_AT.plusSeconds(1)),
+                CouponErrorCode.EXPIRED
+        );
     }
 
-    @Disabled("쿠폰 재고 소진 테스트 작성 예정")
+    @Test
+    void issuesAtPeriodBoundaries() {
+        Coupon coupon = coupon(2);
+
+        coupon.issue(START_AT);
+        coupon.issue(END_AT);
+
+        assertThat(coupon.getRemainingQuantity()).isZero();
+    }
+
     @Test
     void throwsSoldOutWhenNoQuantityRemains() {
+        Coupon coupon = coupon(1);
+        coupon.issue(IN_PERIOD);
+
+        assertCouponError(() -> coupon.issue(IN_PERIOD), CouponErrorCode.SOLD_OUT);
     }
 
-    @Disabled("발급 실패 시 재고 유지 테스트 작성 예정")
     @Test
     void keepsRemainingQuantityWhenIssueFails() {
+        Coupon coupon = coupon(1);
+
+        assertCouponError(() -> coupon.issue(END_AT.plusDays(1)), CouponErrorCode.EXPIRED);
+
+        assertThat(coupon.getRemainingQuantity()).isEqualTo(1);
+    }
+
+    @Test
+    void validateIssuableDoesNotChangeRemainingQuantity() {
+        Coupon coupon = coupon(1);
+
+        coupon.validateIssuable(IN_PERIOD);
+        coupon.validateIssuable(IN_PERIOD);
+
+        assertThat(coupon.getRemainingQuantity()).isEqualTo(1);
+    }
+
+    @Test
+    void validateIssuableThrowsSoldOutWithoutChangingState() {
+        Coupon coupon = coupon(1);
+        coupon.issue(IN_PERIOD);
+
+        assertCouponError(() -> coupon.validateIssuable(IN_PERIOD), CouponErrorCode.SOLD_OUT);
+
+        assertThat(coupon.getRemainingQuantity()).isZero();
     }
 }

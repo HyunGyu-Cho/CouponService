@@ -37,7 +37,7 @@ public class V1CouponIssueService implements CouponIssueUseCase {
         validateNotAlreadyIssued(couponId, userId);
 
         LocalDateTime issuedAt = LocalDateTime.now();
-        coupon.validateIssuable(issuedAt);
+        coupon.issue(issuedAt);
 
         CouponIssue couponIssue = CouponIssue.create(
                 coupon,

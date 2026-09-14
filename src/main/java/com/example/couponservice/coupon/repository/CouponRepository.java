@@ -25,18 +25,20 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
             @Param("couponId") Long couponId
     );
 
-    // 조건부 Update
-    @Modifying
+    // V3 조건부 Atomic UPDATE.
+    // 재고가 남아 있고 발급 기간 안일 때만 1 감소시키며, 갱신된 행 수로 성공 여부를 판단한다.
+    // clearAutomatically: UPDATE 뒤 영속성 컨텍스트를 비워, 이어지는 findById가 옛 값이 아닌 DB 최신 값을 읽게 한다.
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
-     update Coupon c
-      set c.remainingQuantity = c.remainingQuantity -1 
-      where c.id = :couponId
-      and c.remainingQuantity > 0
-      and c.startAt <= :issuedAt
-      and c.endAt >= :isseudAt
-    """)
+            update Coupon coupon
+            set coupon.remainingQuantity = coupon.remainingQuantity - 1
+            where coupon.id = :couponId
+              and coupon.remainingQuantity > 0
+              and coupon.startAt <= :issuedAt
+              and coupon.endAt >= :issuedAt
+            """)
     int decreaseRemainingQuantityIfIssuable(
             @Param("couponId") Long couponId,
-            @Param("isseudAt")LocalDateTime issuedAt
+            @Param("issuedAt") LocalDateTime issuedAt
     );
 }

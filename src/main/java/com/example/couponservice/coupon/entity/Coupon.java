@@ -69,17 +69,23 @@ public class Coupon {
         return new Coupon(name, totalQuantity, startAt, endAt);
     }
 
+    /**
+     * 발급 가능 여부를 검증하고 잔여 수량을 1 감소시킨다.
+     * 상태를 바꾸는 유일한 발급 메서드다.
+     */
     public void issue(LocalDateTime issuedAt) {
         validateIssuable(issuedAt);
         remainingQuantity--;
     }
 
+    /**
+     * 발급 가능 여부만 검증한다. 상태를 바꾸지 않는다.
+     * V3처럼 재고 감소를 DB 조건부 UPDATE로 처리한 뒤 실패 원인을 판별할 때 사용한다.
+     */
     public void validateIssuable(LocalDateTime issuedAt) {
         validateIssuedAt(issuedAt);
         validateIssuablePeriod(issuedAt);
         validateRemainingQuantity();
-
-        remainingQuantity--;
     }
 
     private static void validateName(String name) {

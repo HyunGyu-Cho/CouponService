@@ -40,9 +40,8 @@ public class V2CouponIssueService implements CouponIssueUseCase {
         // 발급시각은 현재 시간으로 한다
         LocalDateTime issuedAt = LocalDateTime.now();
 
-        // validate 함수들 검증한 뒤에
-        // remainingCount를 하나 감소시킨다
-        coupon.validateIssuable(issuedAt);
+        // 발급 가능 여부를 검증한 뒤 잔여 수량을 하나 감소시킨다
+        coupon.issue(issuedAt);
 
         // CouponIssue 만들고
         CouponIssue couponIssue = CouponIssue.create(

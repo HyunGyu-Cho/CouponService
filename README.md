@@ -209,16 +209,16 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 
 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`으로 보존했습니다.
 
-진행 중 (V3, 미검증):
+진행 중 (V3, 구현과 자동 테스트 완료, 부하 실험 대기):
 
-- `V3CouponIssueService`와 조건부 UPDATE 쿼리 초안이 커밋돼 있지만 테스트와 부하 실험을 거치지 않았습니다.
-- 초안에서 발견한 문제와 수정 계획은 [V3 개발 가이드](docs/v3/development-guide.md)에 기록했습니다.
-- V3 초안 작성 과정에서 `Coupon.validateIssuable()`이 재고를 감소시키도록 바뀌어 V1·V2 코드가 개발 가이드의 발급 흐름과 어긋난 상태입니다. V3 정리와 함께 되돌립니다.
+- 조건부 Atomic UPDATE 발급을 구현하고 `Coupon.issue()`와 `validateIssuable()`의 책임을 분리했습니다.
+- 구현 중 REPEATABLE READ 스냅샷 격리와 조건부 UPDATE의 충돌을 재현했고, V3 발급 트랜잭션을 READ COMMITTED로 낮춰 해결했습니다. 근거는 [V3 개발 가이드](docs/v3/development-guide.md)에 있습니다.
+- V1·V2·V3가 같은 시나리오(재고 100, 사용자 300명 동시 요청)를 도는 동시성 자동 테스트를 추가했습니다. V2와 V3는 정확히 100장 발급, 예상 밖 예외 0건을 통과합니다.
+- `CouponTest`의 보류 테스트 9개를 모두 채웠습니다.
 
 보류:
 
-- `CouponTest`의 `@Disabled` 테스트 9개 구현
-- 발급 흐름의 동시성 자동 테스트 (현재는 k6 수동 실행에만 의존)
+- V3 k6 부하 실험과 V2 대비 수치 비교
 - V2 유효 실행의 DB 사후 집계값 보존
 - 1,000 VU 순간 연결에서 발생한 TCP 연결 거절과 HTTP 진입 용량의 별도 분석
 
@@ -228,12 +228,10 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 
 ## 다음 작업
 
-1. `Coupon.validateIssuable()`과 `issue()`의 책임을 분리하고 V1·V2가 `issue()`를 쓰도록 되돌립니다.
-2. V3 발급 순서를 "중복 확인 → 조건부 UPDATE → 이력 저장"으로 고치고 실패 원인 판별이 재고를 바꾸지 않게 합니다.
-3. `CouponTest`의 `@Disabled` 테스트를 채우고 V1·V2·V3 동시성 자동 테스트를 추가합니다.
-4. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
-5. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
-6. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 판단한 뒤 `v3-atomic-update` 태그를 남깁니다.
+1. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
+2. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
+3. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 V3 개발 가이드의 "결과"와 "판단"을 채웁니다.
+4. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 남깁니다.
 
 ## 검사 장치
 

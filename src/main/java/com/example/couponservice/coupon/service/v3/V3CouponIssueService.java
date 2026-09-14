@@ -11,10 +11,29 @@ import com.example.couponservice.coupon.service.CouponIssueUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
+/**
+ * V3: 조건부 Atomic UPDATE 발급.
+ * SELECT FOR UPDATE 없이 "재고 > 0 이면 1 감소" 를 UPDATE 한 번으로 처리해 락 보유 구간을 줄인다.
+ *
+ * <pre>
+ * 중복 발급 확인 (coupon_issue 조회)
+ * -> 조건부 UPDATE (갱신 행 수 0이면 재고를 바꾸지 않고 원인만 판별)
+ * -> CouponIssue 저장
+ * </pre>
+ *
+ * 중복 확인을 UPDATE보다 먼저 두는 이유: 이미 받은 사용자의 요청이 쿠폰 행을 갱신했다가 롤백하는
+ * 불필요한 행 경합을 피하기 위해서다. 동시에 통과한 중복 요청은 DB UNIQUE 제약이 최종 차단한다.
+ *
+ * 격리 수준을 READ COMMITTED로 낮추는 이유: MariaDB의 REPEATABLE READ 스냅샷 격리에서는
+ * 중복 확인 SELECT 이후 다른 트랜잭션이 같은 인덱스 범위에 넣은 행과 충돌해 INSERT가
+ * ER_CHECKREAD(1020)로 실패한다(V1에서 재현한 문제). V3의 정합성은 스냅샷이 아니라
+ * 조건부 UPDATE와 UNIQUE 제약이 보장하므로 REPEATABLE READ가 필요 없다.
+ */
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(
@@ -28,18 +47,18 @@ public class V3CouponIssueService implements CouponIssueUseCase {
     private final CouponIssueRepository couponIssueRepository;
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CouponIssue issueCoupon(
             Long couponId,
             Long userId
     ) {
-        LocalDateTime issuedAt = LocalDateTime.now();
-
-        decreaseRemainingQuantity(couponId, issuedAt);
+        validateCouponExists(couponId);
         validateNotAlreadyIssued(couponId, userId);
 
-        Coupon couponReference = couponRepository.getReferenceById(couponId);
+        LocalDateTime issuedAt = LocalDateTime.now();
+        decreaseRemainingQuantity(couponId, issuedAt);
 
+        Coupon couponReference = couponRepository.getReferenceById(couponId);
         CouponIssue couponIssue = CouponIssue.create(
                 couponReference,
                 userId,
@@ -47,6 +66,27 @@ public class V3CouponIssueService implements CouponIssueUseCase {
         );
 
         return couponIssueRepository.save(couponIssue);
+    }
+
+    private void validateCouponExists(Long couponId) {
+        if (!couponRepository.existsById(couponId)) {
+            throw new CouponException(CouponErrorCode.COUPON_NOT_FOUND);
+        }
+    }
+
+    private void validateNotAlreadyIssued(
+            Long couponId,
+            Long userId
+    ) {
+        boolean alreadyIssued =
+                couponIssueRepository.existsByCoupon_IdAndUserId(
+                        couponId,
+                        userId
+                );
+
+        if (alreadyIssued) {
+            throw new CouponException(CouponErrorCode.DUPLICATE_ISSUE);
+        }
     }
 
     private void decreaseRemainingQuantity(
@@ -64,38 +104,23 @@ public class V3CouponIssueService implements CouponIssueUseCase {
         }
     }
 
+    /**
+     * 조건부 UPDATE가 0건일 때 어떤 조건에 걸렸는지 판별한다.
+     * validateIssuable()은 상태를 바꾸지 않으므로 재고가 이중 감소하지 않는다.
+     */
     private void throwIssueFailure(
             Long couponId,
             LocalDateTime issuedAt
     ) {
         Coupon coupon = couponRepository.findById(couponId)
                 .orElseThrow(() ->
-                        new CouponException(
-                                CouponErrorCode.COUPON_NOT_FOUND
-                        )
+                        new CouponException(CouponErrorCode.COUPON_NOT_FOUND)
                 );
 
         coupon.validateIssuable(issuedAt);
 
         throw new IllegalStateException(
-                "조건부 쿠폰 재고 감소 실패 원인을 확인할 수 없습니다."
+                "조건부 쿠폰 재고 감소 실패 원인을 확인할 수 없습니다. couponId=" + couponId
         );
-    }
-
-    private void validateNotAlreadyIssued(
-            Long couponId,
-            Long userId
-    ) {
-        boolean alreadyIssued =
-                couponIssueRepository.existsByCoupon_IdAndUserId(
-                        couponId,
-                        userId
-                );
-
-        if (alreadyIssued) {
-            throw new CouponException(
-                    CouponErrorCode.DUPLICATE_ISSUE
-            );
-        }
     }
 }
