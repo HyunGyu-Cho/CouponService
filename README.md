@@ -191,6 +191,21 @@ $env:COUPON_ISSUE_VERSION="v2"
 Flyway는 스키마 검증과 마이그레이션에 사용하며 Batch 자동 실행은 비활성화되어 있습니다.
 Redis와 Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.
 
+### 부하 테스트 실행
+
+애플리케이션을 켠 뒤 쿠폰을 하나 만들고, 그 ID로 k6를 실행합니다. 매 실행마다 새 쿠폰을 사용합니다.
+
+```bash
+k6 run -e COUPON_ID=1 -e VUS=100 -e MAX_DURATION=30s load-tests/k6/coupon-issue-concurrency.js
+```
+
+- `VUS`: 동시 사용자 수. 각 VU가 고유한 `userId`로 정확히 한 번 요청합니다. 기본값 1000.
+- `MAX_DURATION`: 이 시간 안에 끝나지 않으면 중단합니다. 기본값 30초.
+- `BASE_URL`: 기본값 `http://localhost:8080`.
+- CLI `--vus` 옵션은 사용자 ID 분배를 깨뜨리므로 쓰지 않습니다.
+
+결과는 `coupon_issue_created`, `coupon_issue_sold_out`, `coupon_issue_duplicate`, `coupon_issue_conflict_other`, `coupon_issue_server_error`, `coupon_issue_network_error`, `coupon_issue_unexpected`로 나뉘어 출력됩니다.
+
 ## 현재 진행 상태
 
 V1의 동시성 문제를 재현한 뒤 V2 비관적 락 구현과 100 VU 검증을 완료했습니다.
@@ -221,6 +236,7 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 - 구현 중 REPEATABLE READ 스냅샷 격리와 조건부 UPDATE의 충돌을 재현했고, V3 발급 트랜잭션을 READ COMMITTED로 낮춰 해결했습니다. 근거는 [V3 개발 가이드](docs/v3/development-guide.md)에 있습니다.
 - V1·V2·V3가 같은 시나리오(재고 100, 사용자 300명 동시 요청)를 도는 동시성 자동 테스트를 추가했습니다. V2와 V3는 정확히 100장 발급, 예상 밖 예외 0건을 통과합니다.
 - `CouponTest`의 보류 테스트 9개를 모두 채웠습니다.
+- k6 스크립트가 201, 409 매진, 409 중복, 409 그 외, 5xx, 네트워크 오류를 분리 집계하고 VU 수와 최대 실행 시간을 환경변수로 받습니다.
 
 보류:
 
@@ -234,10 +250,9 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 
 ## 다음 작업
 
-1. k6에서 HTTP 409의 오류 코드, HTTP 500, 네트워크 오류를 분리 집계합니다.
-2. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
-3. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 V3 개발 가이드의 "결과"와 "판단"을 채웁니다.
-4. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 남깁니다.
+1. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
+2. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 V3 개발 가이드의 "결과"와 "판단"을 채웁니다.
+3. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 남깁니다.
 
 ## 검사 장치
 
