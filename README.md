@@ -240,14 +240,21 @@ V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessi
 - 1,000 VU 순간 연결에서 발생하는 TCP 연결 거절의 원인 분석과 HTTP 진입 용량 조정. Rate Limit과 Virtual Waiting Room 단계에서 다룹니다.
 - DB Lock Wait와 커넥션 풀 점유 수치의 수집. DB 경합을 다시 다룰 때 Actuator 지표로 기록합니다.
 
+진행 중 (V4, 문제 정의):
+
+- V3에서 남은 문제는 같은 쿠폰 행에 대한 DB 경합입니다. 100 VU 순간 부하에서는 드러나지 않았고 1,000 VU는 HTTP 진입 구간이 먼저 막혀 DB까지 가지 못했습니다.
+- 지속 도착률(constant-arrival-rate) 실험으로 이 경합을 재현하는 조건과 관찰 지표, 재현 성공 기준을 [V4 개발 가이드](docs/v4/development-guide.md)의 "문제"에 정의했습니다.
+- Redis는 문제가 재현되기 전까지 발급 흐름에 넣지 않습니다.
+
 아직 구현하지 않음:
 
-- V4 Redis 이후의 모든 단계
+- V4 Redis 원자 연산 구현과 그 이후의 모든 단계
 
 ## 다음 작업
 
-1. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 만들고 push합니다.
-2. V4 Redis 원자 연산 단계의 "문제"를 정의합니다. V3에서 남은 문제는 같은 쿠폰 행에 대한 DB 경합이며, 이를 재현하는 실험 조건을 먼저 설계합니다.
+1. 관측 장치를 준비합니다. Actuator `metrics` 노출, k6 지속 도착률 시나리오, DB `Innodb_row_lock%` 전후 기록 방법.
+2. V3로 도착률 100, 200, 400, 800 req/s 실험을 돌려 V4 개발 가이드의 재현 성공 기준을 확인하고, 결과를 `docs/v4/load-test-result.md`의 "문제 재현" 절로 기록합니다.
+3. 재현되면 V4 "가설"을 확정하고 Redis 원자 연산 설계를 "변경"에 적은 뒤 구현에 들어갑니다.
 
 ## 검사 장치
 
