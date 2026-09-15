@@ -181,6 +181,12 @@ $env:DB_PASSWORD="MariaDB 비밀번호"
 ```
 
 발급 구현 버전은 `application.properties`의 `coupon.issue.version`(`v1`, `v2`, `v3`)으로 선택합니다.
+저장소의 기본값은 현재 진행 단계에 맞춰 `v3`입니다. V2 비교 실험처럼 다른 버전을 실행할 때는 값을 바꾸거나 실행 시 덮어씁니다.
+
+```powershell
+$env:COUPON_ISSUE_VERSION="v2"
+./gradlew.bat bootRun
+```
 
 Flyway는 스키마 검증과 마이그레이션에 사용하며 Batch 자동 실행은 비활성화되어 있습니다.
 Redis와 Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.

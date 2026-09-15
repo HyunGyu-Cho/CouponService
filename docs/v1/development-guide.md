@@ -36,8 +36,19 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
 ```java
 public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> {
     boolean existsByCoupon_IdAndUserId(Long couponId, Long userId);
+
+    @Query("""
+            select couponIssue
+            from CouponIssue couponIssue
+            join fetch couponIssue.coupon
+            where couponIssue.userId = :userId
+            """)
+    List<CouponIssue> findAllWithCouponByUserId(@Param("userId") Long userId);
 }
 ```
+
+- `existsByCoupon_IdAndUserId()`는 발급 흐름의 중복 사전 조회에 사용한다.
+- `findAllWithCouponByUserId()`는 사용자별 보유 쿠폰 조회 API에 사용한다. `Coupon`이 LAZY 연관관계이므로 `join fetch`로 함께 조회해 응답 DTO 변환 시 추가 조회가 생기지 않게 한다.
 
 ## 관찰 대상
 

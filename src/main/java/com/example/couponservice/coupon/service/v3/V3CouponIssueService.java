@@ -21,18 +21,21 @@ import java.time.LocalDateTime;
  * SELECT FOR UPDATE 없이 "재고 > 0 이면 1 감소" 를 UPDATE 한 번으로 처리해 락 보유 구간을 줄인다.
  *
  * <pre>
- * 중복 발급 확인 (coupon_issue 조회)
+ * 쿠폰 존재 확인
+ * -> 중복 발급 확인 (coupon_issue 조회)
  * -> 조건부 UPDATE (갱신 행 수 0이면 재고를 바꾸지 않고 원인만 판별)
- * -> CouponIssue 저장
+ * -> CouponIssue 저장 (Coupon은 getReferenceById 참조)
  * </pre>
  *
  * 중복 확인을 UPDATE보다 먼저 두는 이유: 이미 받은 사용자의 요청이 쿠폰 행을 갱신했다가 롤백하는
  * 불필요한 행 경합을 피하기 위해서다. 동시에 통과한 중복 요청은 DB UNIQUE 제약이 최종 차단한다.
  *
  * 격리 수준을 READ COMMITTED로 낮추는 이유: MariaDB의 REPEATABLE READ 스냅샷 격리에서는
- * 중복 확인 SELECT 이후 다른 트랜잭션이 같은 인덱스 범위에 넣은 행과 충돌해 INSERT가
- * ER_CHECKREAD(1020)로 실패한다(V1에서 재현한 문제). V3의 정합성은 스냅샷이 아니라
- * 조건부 UPDATE와 UNIQUE 제약이 보장하므로 REPEATABLE READ가 필요 없다.
+ * 트랜잭션 안의 첫 SELECT(쿠폰 존재 확인)가 스냅샷을 만들고, 그 뒤 다른 트랜잭션이 쿠폰 행을
+ * 갱신하면 이 트랜잭션의 조건부 UPDATE가 "읽은 뒤 바뀐 행"으로 거부된다
+ * (Record has changed since last read in table 'coupon', 동시성 테스트 300건 중 265건 실패).
+ * V3의 정합성은 스냅샷이 아니라 조건부 UPDATE(재고)와 UNIQUE 제약(중복)이 보장하므로
+ * REPEATABLE READ가 필요 없다. 근거와 재현 과정은 docs/v3/development-guide.md에 있다.
  */
 @Service
 @RequiredArgsConstructor
