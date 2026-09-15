@@ -208,41 +208,37 @@ k6 run -e COUPON_ID=1 -e VUS=100 -e MAX_DURATION=30s load-tests/k6/coupon-issue-
 
 ## 현재 진행 상태
 
-V1의 동시성 문제를 재현한 뒤 V2 비관적 락 구현과 100 VU 검증을 완료했습니다.
-V2 설계와 실험 결과는 다음 문서에 기록했습니다.
+V1 동시성 문제 재현, V2 비관적 락, V3 조건부 Atomic UPDATE까지 구현과 부하 실험을 완료했습니다.
+V3 설계와 실험 결과는 다음 문서에 기록했습니다.
 
-- [V2 개발 가이드](docs/v2/development-guide.md)
-- [V2 부하 테스트 결과](docs/v2/load-test-result.md)
+- [V3 개발 가이드](docs/v3/development-guide.md)
+- [V3 부하 테스트 결과](docs/v3/load-test-result.md)
+
+이전 단계 문서: [V1 개발 가이드](docs/v1/development-guide.md), [V1 부하 테스트 결과](docs/v1/load-test-result.md), [V2 개발 가이드](docs/v2/development-guide.md), [V2 부하 테스트 결과](docs/v2/load-test-result.md)
 
 완료:
 
 - `Coupon`, `CouponIssue` JPA 엔티티와 `(coupon_id, user_id)` UNIQUE 제약
 - 쿠폰 생성, 단건 조회, 발급, 사용자별 보유 쿠폰 조회 API
 - DTO Validation과 안전한 공통 오류 응답
-- V1 동기 발급 Service와 트랜잭션 경계
+- V1 동기 발급 Service와 트랜잭션 경계, 100 VU에서 스냅샷 충돌로 82% HTTP 500 재현
 - 발급 기간, 재고, 중복 발급에 대한 도메인 및 DB 방어
 - LAZY 연관관계를 함께 조회하는 사용자별 보유 쿠폰 JPQL
-- 공통 API 계약, 공통 개발 가이드, V1 개발 가이드
-- `PESSIMISTIC_WRITE`를 적용한 V2 쿠폰 행 잠금 조회
-- 설정값으로 V1과 V2 발급 구현체 선택
-- 실행 SQL의 `FOR UPDATE` 확인
-- 재고 100개와 100 VU 조건에서 100건 발급, unexpected 0건 확인
+- 공통 API 계약, 공통 개발 가이드, 단계별 개발 가이드
+- V2 `PESSIMISTIC_WRITE` 행 잠금 발급과 `FOR UPDATE` SQL 확인, 100 VU에서 HTTP 500 제거
+- V3 조건부 Atomic UPDATE 발급, `Coupon.issue()`와 `validateIssuable()` 책임 분리, V3 발급 트랜잭션 READ COMMITTED
+- 설정값으로 V1·V2·V3 발급 구현체 선택
+- V1·V2·V3가 같은 시나리오(재고 100, 사용자 300명 동시 요청)를 도는 동시성 자동 테스트
+- k6 스크립트의 응답 원인별 분리 집계(201, 409 매진, 409 중복, 5xx, 네트워크 오류)와 환경변수 VU 수
+- V2·V3 동일 조건 비교: 100 VU에서 V3 p95 273~310ms, V2 485ms, 6회 실행 모두 `consistency_gap` 0
+- 1,000 VU에서 V2 실험의 원인 미상 "unexpected"가 TCP 연결 거절임을 분리 집계로 확인
 
-완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`으로 보존했습니다.
-
-진행 중 (V3, 구현과 자동 테스트 완료, 부하 실험 대기):
-
-- 조건부 Atomic UPDATE 발급을 구현하고 `Coupon.issue()`와 `validateIssuable()`의 책임을 분리했습니다.
-- 구현 중 REPEATABLE READ 스냅샷 격리와 조건부 UPDATE의 충돌을 재현했고, V3 발급 트랜잭션을 READ COMMITTED로 낮춰 해결했습니다. 근거는 [V3 개발 가이드](docs/v3/development-guide.md)에 있습니다.
-- V1·V2·V3가 같은 시나리오(재고 100, 사용자 300명 동시 요청)를 도는 동시성 자동 테스트를 추가했습니다. V2와 V3는 정확히 100장 발급, 예상 밖 예외 0건을 통과합니다.
-- `CouponTest`의 보류 테스트 9개를 모두 채웠습니다.
-- k6 스크립트가 201, 409 매진, 409 중복, 409 그 외, 5xx, 네트워크 오류를 분리 집계하고 VU 수와 최대 실행 시간을 환경변수로 받습니다.
+V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`으로 보존했고, V3는 `v3-atomic-update` 태그를 만들 차례입니다.
 
 보류:
 
-- V3 k6 부하 실험과 V2 대비 수치 비교
-- V2 유효 실행의 DB 사후 집계값 보존
-- 1,000 VU 순간 연결에서 발생한 TCP 연결 거절과 HTTP 진입 용량의 별도 분석
+- 1,000 VU 순간 연결에서 발생하는 TCP 연결 거절의 원인 분석과 HTTP 진입 용량 조정. Rate Limit과 Virtual Waiting Room 단계에서 다룹니다.
+- DB Lock Wait와 커넥션 풀 점유 수치의 수집. DB 경합을 다시 다룰 때 Actuator 지표로 기록합니다.
 
 아직 구현하지 않음:
 
@@ -250,9 +246,8 @@ V2 설계와 실험 결과는 다음 문서에 기록했습니다.
 
 ## 다음 작업
 
-1. V2와 V3를 동일한 데이터와 부하 조건에서 반복 측정하고 `docs/v3/load-test-result.md`에 기록합니다.
-2. 정합성, p95, 처리량, Lock Wait와 Connection 점유를 비교해 V3 개발 가이드의 "결과"와 "판단"을 채웁니다.
-3. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 남깁니다.
+1. `scripts/check-stage.sh v3`를 통과시킨 뒤 `v3-atomic-update` 태그를 만들고 push합니다.
+2. V4 Redis 원자 연산 단계의 "문제"를 정의합니다. V3에서 남은 문제는 같은 쿠폰 행에 대한 DB 경합이며, 이를 재현하는 실험 조건을 먼저 설계합니다.
 
 ## 검사 장치
 
