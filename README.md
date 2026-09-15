@@ -206,6 +206,27 @@ k6 run -e COUPON_ID=1 -e VUS=100 -e MAX_DURATION=30s load-tests/k6/coupon-issue-
 
 결과는 `coupon_issue_created`, `coupon_issue_sold_out`, `coupon_issue_duplicate`, `coupon_issue_conflict_other`, `coupon_issue_server_error`, `coupon_issue_network_error`, `coupon_issue_unexpected`로 나뉘어 출력됩니다.
 
+지속 부하 실험은 별도 스크립트를 씁니다. 정해진 도착률로 일정 시간 계속 요청하므로 재고는 매진되지 않을 만큼 크게 만듭니다.
+
+```bash
+k6 run -e COUPON_ID=1 -e RATE=200 -e DURATION=30s --log-output=stdout load-tests/k6/coupon-issue-sustained.js
+```
+
+- `RATE`: 초당 요청 수. 기본값 100.
+- `DURATION`: 지속 시간. 기본값 30초.
+- `USER_ID_OFFSET`: 같은 쿠폰으로 다시 돌릴 때 이전 실행의 사용자 번호와 겹치지 않게 더할 값.
+- `PRE_ALLOCATED_VUS`, `MAX_VUS`: 미리 준비할 VU 수와 상한. 기본값은 도착률에 맞춰 정해지며 1,000 미만으로 둡니다.
+
+실험 전후와 도중의 상태는 `load-tests/snapshot.ps1`로 기록합니다. 애플리케이션의 커넥션 풀 지표(Actuator)와 DB의 `Innodb_row_lock%` 통계를 한 번에 찍습니다.
+
+```powershell
+./load-tests/snapshot.ps1 -Label before
+./load-tests/snapshot.ps1 -Label during -WatchSeconds 30
+./load-tests/snapshot.ps1 -Label after -CouponId 1
+```
+
+DB 비밀번호는 환경변수 `DB_PASSWORD`가 있으면 그것을 쓰고 없으면 물어봅니다.
+
 ## 현재 진행 상태
 
 V1 동시성 문제 재현, V2 비관적 락, V3 조건부 Atomic UPDATE까지 구현과 부하 실험을 완료했습니다.
@@ -240,11 +261,13 @@ V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessi
 - 1,000 VU 순간 연결에서 발생하는 TCP 연결 거절의 원인 분석과 HTTP 진입 용량 조정. Rate Limit과 Virtual Waiting Room 단계에서 다룹니다.
 - DB Lock Wait와 커넥션 풀 점유 수치의 수집. DB 경합을 다시 다룰 때 Actuator 지표로 기록합니다.
 
-진행 중 (V4, 문제 정의):
+진행 중 (V4, 문제 재현 완료·가설 확정, 구현 전):
 
-- V3에서 남은 문제는 같은 쿠폰 행에 대한 DB 경합입니다. 100 VU 순간 부하에서는 드러나지 않았고 1,000 VU는 HTTP 진입 구간이 먼저 막혀 DB까지 가지 못했습니다.
-- 지속 도착률(constant-arrival-rate) 실험으로 이 경합을 재현하는 조건과 관찰 지표, 재현 성공 기준을 [V4 개발 가이드](docs/v4/development-guide.md)의 "문제"에 정의했습니다.
-- Redis는 문제가 재현되기 전까지 발급 흐름에 넣지 않습니다.
+- V3에 남은 문제인 같은 쿠폰 행에 대한 DB 경합을 지속 도착률 실험으로 재현했습니다. 이 환경에서 단일 쿠폰 동기 발급은 초당 약 1,200건에서 포화되고 p95가 7ms에서 790ms로 뜁니다. 포화 시 커넥션 시간의 절반 이상이 행 잠금 대기였습니다.
+- 정상 범위에서도 실행마다 한 번, 원인 미상의 1~2초 정지가 Tomcat 스레드 전부를 행 잠금 뒤에 쌓이게 했습니다.
+- 재현 조건, 관찰 지표, 판단은 [V4 개발 가이드](docs/v4/development-guide.md)와 [V4 부하 테스트 결과](docs/v4/load-test-result.md) 1부에 있습니다.
+- 관측 장치를 추가했습니다. Actuator metrics 노출, 지속 도착률 k6 스크립트, 실험 전후 상태 기록 스크립트.
+- 가설: 재고 감소와 중복 확인을 Redis Lua 원자 연산으로 옮겨 `coupon` 행 갱신을 발급 경로에서 제거하면 포화 지점이 올라간다.
 
 아직 구현하지 않음:
 
@@ -252,9 +275,9 @@ V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessi
 
 ## 다음 작업
 
-1. 관측 장치를 준비합니다. Actuator `metrics` 노출, k6 지속 도착률 시나리오, DB `Innodb_row_lock%` 전후 기록 방법.
-2. V3로 도착률 100, 200, 400, 800 req/s 실험을 돌려 V4 개발 가이드의 재현 성공 기준을 확인하고, 결과를 `docs/v4/load-test-result.md`의 "문제 재현" 절로 기록합니다.
-3. 재현되면 V4 "가설"을 확정하고 Redis 원자 연산 설계를 "변경"에 적은 뒤 구현에 들어갑니다.
+1. V4 개발 가이드 "변경"에 Redis 키 구조, Lua 스크립트, DB 저장 순서, 쿠폰 생성 시 Redis 초기화 방법을 설계합니다.
+2. `coupon.service.v4.V4CouponIssueService`를 구현하고 V1~V3와 같은 동시성 자동 테스트를 통과시킵니다. 로컬 Redis 실행 방법을 README "로컬 실행"에 추가합니다.
+3. 1부와 같은 조건(도착률 400, 800, 1,600)으로 V4를 측정해 `docs/v4/load-test-result.md` 2부에 기록하고 "결과"와 "판단"을 채웁니다.
 
 ## 검사 장치
 
