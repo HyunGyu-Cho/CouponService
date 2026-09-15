@@ -275,8 +275,8 @@ V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessi
 
 ## 다음 작업
 
-1. V4 개발 가이드 "변경"에 Redis 키 구조, Lua 스크립트, DB 저장 순서, 쿠폰 생성 시 Redis 초기화 방법을 설계합니다.
-2. `coupon.service.v4.V4CouponIssueService`를 구현하고 V1~V3와 같은 동시성 자동 테스트를 통과시킵니다. 로컬 Redis 실행 방법을 README "로컬 실행"에 추가합니다.
+1. V4 개발 가이드 "변경"의 설계 초안(Redis 키, Lua 스크립트, 지연 초기화, DB 저장과 보상)에 따라 `coupon.service.v4.V4CouponIssueService`를 구현합니다. 구현 순서는 가이드의 "구현 순서"를 따릅니다.
+2. V1~V3와 같은 동시성 자동 테스트와 V4 순차 테스트를 통과시킵니다. 로컬 Redis 실행 방법을 README "로컬 실행"에, Redis 서비스를 CI에 추가합니다.
 3. 1부와 같은 조건(도착률 400, 800, 1,600)으로 V4를 측정해 `docs/v4/load-test-result.md` 2부에 기록하고 "결과"와 "판단"을 채웁니다.
 
 ## 검사 장치

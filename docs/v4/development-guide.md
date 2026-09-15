@@ -117,13 +117,127 @@ Redis가 재고를 결정하고 DB가 이력을 저장하면 두 저장소가 �
 
 ## 변경
 
-아직 없음. 다음 순서로 설계한다.
+설계 초안이다. 구현하면서 달라진 결정은 이 절을 고쳐 기록한다.
 
-1. Redis에 둘 데이터와 키 구조: 쿠폰별 잔여 수량, 쿠폰별 발급 사용자 집합.
-2. Lua 스크립트 하나로 "중복 확인 → 재고 확인 → 재고 감소 → 사용자 등록"을 원자적으로 수행.
-3. Redis가 발급을 승인한 뒤 `coupon_issue`를 DB에 저장. `coupon` 행은 갱신하지 않음.
-4. 쿠폰 생성 시 Redis 초기화 시점과 방법, Redis에 값이 없을 때의 동작.
-5. API 계약은 유지 (`201 Created`, 동기 응답). 변경이 필요하면 `docs/api.md`를 먼저 고친다.
+### 설계 원칙
+
+- 발급 경로에서 `coupon` 행을 갱신하지 않는다. 재현 실험에서 병목으로 확인된 그 행이다.
+- 재고 감소와 중복 확인은 Redis 안에서 Lua 스크립트 하나로 원자적으로 끝낸다. 두 명령 사이에 다른 요청이 끼어들 틈을 없앤다.
+- Redis가 승인한 발급만 DB `coupon_issue`에 저장한다. DB UNIQUE 제약은 최종 방어선으로 그대로 둔다.
+- 외부 API 계약은 유지한다. 동기 `201 Created`, 요청·응답 JSON 동일.
+- 사용하지 않는 추상화를 미리 만들지 않는다. 처음에는 V4 Service 하나에 담고, 커지면 분리한다.
+
+### 발급 흐름
+
+```text
+1. 쿠폰 존재와 발급 기간 확인: DB 일반 조회 (잠금 없음, 행 갱신 없음)
+2. Lua 스크립트 실행 (원자적)
+     이미 발급한 사용자인가?  -> 중복
+     재고 키가 없는가?        -> 미초기화
+     재고가 0 이하인가?       -> 매진
+     재고 1 감소, 사용자 등록 -> 승인
+3. 미초기화면 DB에서 초기화한 뒤 2를 한 번 재시도
+4. 승인이면 CouponIssue 저장 (Coupon 은 getReferenceById 참조)
+5. 저장 실패 시 Redis 보상 (재고 +1, 사용자 제거) 후 예외 전파
+```
+
+V3와 비교하면 "조건부 UPDATE"가 "Lua 스크립트"로 바뀌고, DB에는 INSERT만 남는다. `coupon_issue` INSERT는 행마다 다른 키를 쓰므로 같은 쿠폰의 요청끼리 잠금을 다투지 않는다.
+
+### Redis 키
+
+| 키 | 타입 | 값 | 용도 |
+|---|---|---|---|
+| `coupon:{couponId}:stock` | String (정수) | 잔여 수량 | Lua 에서 확인하고 1 감소 |
+| `coupon:{couponId}:issued` | Set | 발급받은 userId 집합 | Lua 에서 중복 확인과 등록 |
+
+- 키 이름은 `coupon:` 접두사와 쿠폰 ID로 시작해 한 쿠폰의 키가 모여 보이게 한다.
+- TTL 은 두지 않는다. 만료 정책은 V9 Cache 단계의 주제다.
+- 발급 기간은 Redis 에 두지 않는다. 1번 단계의 DB 조회가 이미 `Coupon` 을 읽으므로 거기서 검증한다.
+
+### Lua 스크립트
+
+`src/main/resources/redis/issue-coupon.lua` 에 두고 `DefaultRedisScript<Long>` 빈으로 로드한다. 반환값은 정수 하나다.
+
+```text
+KEYS[1] = stock 키, KEYS[2] = issued 키, ARGV[1] = userId
+
+issued 에 userId 가 있으면            -> -1  (중복)
+stock 키가 없으면                     -> -3  (미초기화)
+stock <= 0 이면                       -> -2  (매진)
+그 외: stock 을 1 감소, issued 에 userId 추가 -> 감소 후 잔여 수량 (0 이상)
+```
+
+- Redis 는 스크립트 하나를 실행하는 동안 다른 명령을 끼워 넣지 않는다. 이것이 "중복 확인과 재고 감소의 원자성"이다.
+- 반환 코드는 Service 가 `CouponErrorCode` 로 바꾼다. `-1 -> DUPLICATE_ISSUE`, `-2 -> SOLD_OUT`. `-3` 은 오류가 아니라 초기화 신호다.
+- 매직 넘버는 Service 의 상수로 이름을 붙인다.
+
+### Redis 초기화
+
+쿠폰 생성 시점이 아니라 **첫 발급 요청에서 지연 초기화**한다. 이유는 두 가지다.
+
+- 쿠폰 생성 트랜잭션 안에서 Redis 를 쓰면, DB 가 롤백돼도 Redis 키는 남는다. 커밋 이후 훅으로 풀 수 있지만 장치가 하나 더 생긴다.
+- V4 이전에 만든 쿠폰도 V4 로 발급할 수 있어야 한다.
+
+초기화 절차는 다음과 같다. Lua 가 `-3` 을 반환한 요청이 수행한다.
+
+```text
+1. DB 에서 발급 수를 센다: count(coupon_issue where coupon_id = ?)
+2. stock = total_quantity - 발급 수
+3. SET coupon:{id}:stock stock NX      -- 이미 있으면 건드리지 않는다
+4. SADD coupon:{id}:issued 기존 발급 userId 전부   -- 없으면 생략, 중복 추가는 무해
+5. Lua 를 한 번만 재시도한다. 또 -3 이면 예외
+```
+
+두 요청이 동시에 `-3` 을 받아도 `SET NX` 는 한쪽만 성공하고, `SADD` 는 여러 번 해도 결과가 같다. 재시도 이후에는 Lua 가 다시 원자성을 보장한다.
+
+### DB 저장과 보상
+
+- 발급 전체를 하나의 public `@Transactional` 메서드로 묶는 공통 규칙을 따른다. 트랜잭션 안에서 Redis 를 호출하고 `CouponIssue` 를 저장한다. `coupon` 행을 잠그지 않으므로 트랜잭션이 커넥션을 쥐는 시간은 INSERT 한 번 분량이다.
+- 격리 수준은 DB 기본값으로 되돌린다. V3 가 READ COMMITTED 로 낮춘 이유였던 "읽은 뒤 바뀐 행의 UPDATE" 가 V4 에는 없다. 단, 1번 단계의 `coupon` SELECT 뒤에 다른 트랜잭션이 그 행을 바꾸는 일도 V4 에서는 없으므로 스냅샷 충돌이 나지 않는다. 구현 중 충돌이 재현되면 이 결정을 고친다.
+- `CouponIssue` 저장이 실패하면 (DB 장애, UNIQUE 위반) Redis 에 보상한다: `INCR stock`, `SREM issued userId`. 그 뒤 예외를 그대로 던져 트랜잭션을 롤백한다.
+- 이 보상은 "최선의 노력"이다. Redis 는 성공했는데 DB 저장과 보상이 모두 실패하면 두 저장소가 어긋난다. 이 상황은 로드맵의 "실험: Redis 성공 후 DB 실패" 에서 재현하고 V8 Reconciliation 에서 다룬다. V4 는 이 한계를 알고 시작한다.
+
+### `coupon.remaining_quantity` 의 의미 변화
+
+V4 부터 실시간 재고는 Redis `stock` 키에 있고, DB `coupon.remaining_quantity` 는 발급 경로에서 갱신하지 않는다. 따라서
+
+- 정합성 불변식의 정본은 `발급 수 = count(coupon_issue)` 와 `Redis stock = total_quantity - 발급 수` 다.
+- `GET /api/coupons/{couponId}` 의 `remainingQuantity` 는 DB 값이므로 V4 에서는 최신이 아닐 수 있다. 이 사실은 [API 계약](../api.md) 에 적는다. 실시간 값 반영은 V8 대사 또는 V9 캐시에서 정한다.
+- 부하 실험의 사후 검증 SQL 도 V4 용으로 바꾼다: `total_quantity - (GET stock) = count(coupon_issue)`, `SCARD issued = count(coupon_issue)`.
+
+### 엔티티 변경
+
+`Coupon.validateIssuable()` 은 재고까지 검사하므로 V4 에서 쓰면 DB 의 낡은 재고로 잘못 거부한다. 발급 기간만 검사하는 public 메서드를 하나 둔다. 기존 `validateIssuablePeriod()` 를 public 으로 열되, 기존 호출부와 이름 규칙(`validate` 는 예외 또는 무반환)을 유지한다.
+
+### 구성
+
+- `coupon.service.v4.V4CouponIssueService`, `@ConditionalOnProperty(coupon.issue.version = v4)`.
+- Lua 스크립트 빈: `DefaultRedisScript<Long>` 을 `ClassPathResource("redis/issue-coupon.lua")` 로 만드는 `@Configuration`. 스크립트 로드는 V4 전용이므로 `coupon.service.v4` 패키지 안에 둔다.
+- Redis 접근은 `StringRedisTemplate`. Spring Boot 자동 구성을 쓰고 `spring.data.redis.host`, `port` 만 설정한다.
+- `management.health.redis.enabled` 는 V4 를 켤 때 `true` 로 되돌린다.
+- 로컬 Redis 는 Docker Desktop 으로 띄운다. README "로컬 실행" 에 추가한다.
+
+```bash
+docker run -d --name coupon-redis -p 6379:6379 redis:7
+```
+
+- CI 워크플로의 `build-test` 와 `stage` job 에 `redis:7` 서비스를 추가한다.
+
+### 테스트
+
+- `V4CouponIssueConcurrencyTest`: 기존 `CouponIssueConcurrencyTestBase` 를 그대로 상속한다. 단, 베이스가 `remaining_quantity` 로 불변식을 검증하므로 V4 에서는 그 검증이 맞지 않는다. 베이스의 잔여 수량 조회를 버전별로 바꿀 수 있게 손보거나, V4 테스트가 Redis `stock` 을 읽도록 한다. 어느 쪽이든 "발급 수 == 전체 - 잔여" 의 잔여는 Redis 값이어야 한다.
+- `V4CouponIssueServiceTest`: 순차 시나리오. 중복, 매진, 기간 전후, 없는 쿠폰, 그리고 **V4 전용으로 미초기화 쿠폰의 첫 발급**(지연 초기화)과 **기존 발급 이력이 있는 쿠폰의 초기화**(발급 수를 뺀 재고, issued 집합 복원).
+- 테스트는 실행 후 Redis 키를 지운다. DB 정리와 같은 위치(`@AfterEach`)에서 한다.
+
+### 구현 순서
+
+1. Lua 스크립트와 로드 설정
+2. `Coupon` 기간 검증 메서드
+3. `V4CouponIssueService` 정상 경로 (초기화 포함)
+4. 오류 경로와 보상
+5. 테스트 두 개
+6. README 로컬 실행, CI Redis 서비스, `docs/api.md` 주석
+7. 1부와 같은 조건으로 부하 실험, 2부 기록
 
 ## 결과
 
