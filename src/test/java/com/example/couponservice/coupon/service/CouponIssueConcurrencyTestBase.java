@@ -74,6 +74,22 @@ public abstract class CouponIssueConcurrencyTestBase {
     void deleteCoupon() {
         jdbcTemplate.update("delete from coupon_issue where coupon_id = ?", couponId);
         jdbcTemplate.update("delete from coupon where id = ?", couponId);
+        cleanUpVersionState(couponId);
+    }
+
+    /**
+     * 실시간 잔여 수량을 읽는다. V1~V3는 DB의 remaining_quantity가 정본이지만
+     * V4처럼 재고를 DB 밖에서 관리하는 구현은 읽을 곳이 다르므로 하위 클래스가 바꾼다.
+     */
+    protected int getRemainingQuantity(Long couponId) {
+        return jdbcTemplate.queryForObject(
+                "select remaining_quantity from coupon where id = ?", Integer.class, couponId);
+    }
+
+    /**
+     * DB 밖에 남는 버전별 상태를 정리한다. 남는 것이 없는 버전은 그대로 둔다.
+     */
+    protected void cleanUpVersionState(Long couponId) {
     }
 
     @Test
@@ -116,8 +132,7 @@ public abstract class CouponIssueConcurrencyTestBase {
 
         Integer issueCount = jdbcTemplate.queryForObject(
                 "select count(*) from coupon_issue where coupon_id = ?", Integer.class, couponId);
-        Integer remaining = jdbcTemplate.queryForObject(
-                "select remaining_quantity from coupon where id = ?", Integer.class, couponId);
+        int remaining = getRemainingQuantity(couponId);
 
         String detail = "성공=" + created.get()
                 + ", 비즈니스오류=" + businessErrors

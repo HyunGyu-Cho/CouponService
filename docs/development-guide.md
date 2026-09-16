@@ -60,6 +60,7 @@
 - `startAt`은 `endAt`보다 이전이어야 한다.
 - `Coupon.issue(issuedAt)`가 발급 기간과 재고를 검증하고 잔여 수량을 1 감소시킨다.
 - 검증만 하는 메서드는 상태를 바꾸지 않는다. `validate...()`는 재고를 감소시키지 않는다.
+- `Coupon.validateIssuablePeriod(issuedAt)`는 발급 기간만 검증하고 재고를 보지 않는다. V4처럼 실시간 재고를 DB 밖에서 관리하는 구현이 DB의 낡은 잔여 수량으로 잘못 거부하지 않도록 쓴다.
 - 현재 발급 기간 경계는 시작과 종료 시각을 포함한다.
 
 ### CouponIssue

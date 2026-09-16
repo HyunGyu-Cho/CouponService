@@ -83,9 +83,25 @@ public class Coupon {
      * V3처럼 재고 감소를 DB 조건부 UPDATE로 처리한 뒤 실패 원인을 판별할 때 사용한다.
      */
     public void validateIssuable(LocalDateTime issuedAt) {
-        validateIssuedAt(issuedAt);
         validateIssuablePeriod(issuedAt);
         validateRemainingQuantity();
+    }
+
+    /**
+     * 발급 기간만 검증한다. 재고는 보지 않는다.
+     * V4처럼 실시간 재고를 Redis가 들고 있는 구현은 DB의 낡은 잔여 수량으로 거부하면 안 되므로
+     * 재고 검증이 빠진 이 메서드를 사용한다.
+     */
+    public void validateIssuablePeriod(LocalDateTime issuedAt) {
+        validateIssuedAt(issuedAt);
+
+        if (issuedAt.isBefore(startAt)) {
+            throw new CouponException(CouponErrorCode.NOT_STARTED);
+        }
+
+        if (issuedAt.isAfter(endAt)) {
+            throw new CouponException(CouponErrorCode.EXPIRED);
+        }
     }
 
     private static void validateName(String name) {
@@ -116,16 +132,6 @@ public class Coupon {
     private static void validateIssuedAt(LocalDateTime issuedAt) {
         if (issuedAt == null) {
             throw new CouponException(CouponErrorCode.ISSUED_AT_REQUIRED);
-        }
-    }
-
-    private void validateIssuablePeriod(LocalDateTime issuedAt) {
-        if (issuedAt.isBefore(startAt)) {
-            throw new CouponException(CouponErrorCode.NOT_STARTED);
-        }
-
-        if (issuedAt.isAfter(endAt)) {
-            throw new CouponException(CouponErrorCode.EXPIRED);
         }
     }
 

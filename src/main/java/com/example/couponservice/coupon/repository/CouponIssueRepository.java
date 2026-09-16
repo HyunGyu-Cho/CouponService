@@ -24,4 +24,15 @@ public interface CouponIssueRepository extends JpaRepository<CouponIssue, Long> 
     List<CouponIssue> findAllWithCouponByUserId(
             @Param("userId") Long userId
     );
+
+    // V4 전용. Redis 초기화가 이미 발급받은 사용자 집합을 복원할 때 쓴다.
+    // 엔티티가 아니라 userId만 읽어 초기화 비용을 줄인다.
+    @Query("""
+            select couponIssue.userId
+            from CouponIssue couponIssue
+            where couponIssue.coupon.id = :couponId
+            """)
+    List<Long> findUserIdsByCouponId(
+            @Param("couponId") Long couponId
+    );
 }

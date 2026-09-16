@@ -1,6 +1,6 @@
 # V4 Redis Atomic Operation Development Guide
 
-상태: 초안 (문제 재현 완료, 가설 확정, 구현 전, 미검증). 재현 수치는 [V4 부하 테스트 결과](load-test-result.md) 1부에 있다.
+상태: 초안 (문제 재현 완료, 가설 확정, 발급 경로 구현 완료, 부하 실험 전이라 미검증). 재현 수치는 [V4 부하 테스트 결과](load-test-result.md) 1부에 있다.
 공통 규칙은 [공통 개발 가이드](../development-guide.md)를 따른다.
 
 ## 문제
@@ -137,8 +137,8 @@ Redis가 재고를 결정하고 DB가 이력을 저장하면 두 저장소가 �
      재고가 0 이하인가?       -> 매진
      재고 1 감소, 사용자 등록 -> 승인
 3. 미초기화면 DB에서 초기화한 뒤 2를 한 번 재시도
-4. 승인이면 CouponIssue 저장 (Coupon 은 getReferenceById 참조)
-5. 저장 실패 시 Redis 보상 (재고 +1, 사용자 제거) 후 예외 전파
+4. 승인이면 CouponIssue 저장 (1번에서 읽은 Coupon 을 그대로 참조, 즉시 flush)
+5. 저장 실패 시 실패 원인에 따라 Redis 보상 후 예외 전파
 ```
 
 V3와 비교하면 "조건부 UPDATE"가 "Lua 스크립트"로 바뀌고, DB에는 INSERT만 남는다. `coupon_issue` INSERT는 행마다 다른 키를 쓰므로 같은 쿠폰의 요청끼리 잠금을 다투지 않는다.
@@ -181,21 +181,55 @@ stock <= 0 이면                       -> -2  (매진)
 초기화 절차는 다음과 같다. Lua 가 `-3` 을 반환한 요청이 수행한다.
 
 ```text
-1. DB 에서 발급 수를 센다: count(coupon_issue where coupon_id = ?)
-2. stock = total_quantity - 발급 수
-3. SET coupon:{id}:stock stock NX      -- 이미 있으면 건드리지 않는다
-4. SADD coupon:{id}:issued 기존 발급 userId 전부   -- 없으면 생략, 중복 추가는 무해
+1. DB 에서 기존 발급자 userId 목록을 읽는다: select user_id from coupon_issue where coupon_id = ?
+2. SADD coupon:{id}:issued 목록 전부       -- 목록이 비면 생략, 중복 추가는 무해
+3. stock = total_quantity - 목록 크기
+4. SET coupon:{id}:stock stock NX          -- 마지막. 이미 있으면 건드리지 않는다
 5. Lua 를 한 번만 재시도한다. 또 -3 이면 예외
 ```
 
-두 요청이 동시에 `-3` 을 받아도 `SET NX` 는 한쪽만 성공하고, `SADD` 는 여러 번 해도 결과가 같다. 재시도 이후에는 Lua 가 다시 원자성을 보장한다.
+**`stock` 키를 마지막에 만드는 것이 이 절차의 핵심이다.** Lua 가 발급을 승인하려면 `stock` 키가 있어야 하므로, `stock` 키의 존재 자체가 "`issued` 복원이 끝났다"는 완료 표시가 된다. 별도의 초기화 락 없이 "초기화가 끝나기 전에는 아무도 발급받지 못한다" 가 성립한다.
+
+순서를 뒤집어 `SET stock` 을 `SADD issued` 보다 먼저 하면 다음 창이 열린다.
+
+```text
+A: SET coupon:1:stock 950 NX      (성공, 이 순간부터 stock 키 존재)
+                                   B: Lua 실행
+                                      issued 가 아직 비어 있음 -> 중복 아님
+                                      stock > 0 -> 승인, 재고 감소, SADD userB
+A: SADD coupon:1:issued (기존 발급자 전부)
+```
+
+B 가 이미 `coupon_issue` 에 행이 있는 사용자면 중복 검사를 통과한다. DB UNIQUE 제약이 INSERT 를 막으므로 불변식 자체는 지켜지지만, 그 실패는 보상을 부르고 보상은 Redis 상태를 더 망가뜨린다 (아래 "DB 저장과 보상" 참고). 최종 방어선이 막아준다는 것이 설계가 안전하다는 뜻은 아니다.
+
+절차의 멱등성과 동시 실행:
+
+- 두 요청이 동시에 `-3` 을 받아도 `SADD` 는 여러 번 해도 결과가 같고 `SET NX` 는 한쪽만 성공한다. 재시도 이후에는 Lua 가 다시 원자성을 보장한다.
+- 1번의 목록 조회와 4번의 `SET NX` 사이에 `coupon_issue` 행이 늘어나는 일은 없다. 행이 늘어나려면 Lua 승인이 필요하고 승인에는 `stock` 키가 필요한데, 그 키가 아직 없기 때문이다. 재고 계산의 기준이 흔들리지 않는다.
+- 2번까지 하고 프로세스가 죽으면 `issued` 만 채워진 상태가 남는다. 다음 요청이 같은 절차를 다시 수행하므로 복구된다.
+- 목록이 크면 `SADD` 를 나눠 보낸다. 부하 실험용 쿠폰은 매번 새로 만들어 목록이 비어 있지만, 초기화 비용이 기존 발급 수에 비례한다는 사실은 남는다.
+
+이 안전성은 `stock` 키가 사라지지 않는다는 전제 위에 있다. 키가 축출되면 이미 승인돼 INSERT 중인 요청이 있는 채로 재계산이 돌아 재고가 어긋난다. TTL 을 두지 않는 것에 더해 Redis 를 `maxmemory-policy noeviction` 으로 띄운다.
 
 ### DB 저장과 보상
 
 - 발급 전체를 하나의 public `@Transactional` 메서드로 묶는 공통 규칙을 따른다. 트랜잭션 안에서 Redis 를 호출하고 `CouponIssue` 를 저장한다. `coupon` 행을 잠그지 않으므로 트랜잭션이 커넥션을 쥐는 시간은 INSERT 한 번 분량이다.
 - 격리 수준은 DB 기본값으로 되돌린다. V3 가 READ COMMITTED 로 낮춘 이유였던 "읽은 뒤 바뀐 행의 UPDATE" 가 V4 에는 없다. 단, 1번 단계의 `coupon` SELECT 뒤에 다른 트랜잭션이 그 행을 바꾸는 일도 V4 에서는 없으므로 스냅샷 충돌이 나지 않는다. 구현 중 충돌이 재현되면 이 결정을 고친다.
-- `CouponIssue` 저장이 실패하면 (DB 장애, UNIQUE 위반) Redis 에 보상한다: `INCR stock`, `SREM issued userId`. 그 뒤 예외를 그대로 던져 트랜잭션을 롤백한다.
-- 이 보상은 "최선의 노력"이다. Redis 는 성공했는데 DB 저장과 보상이 모두 실패하면 두 저장소가 어긋난다. 이 상황은 로드맵의 "실험: Redis 성공 후 DB 실패" 에서 재현하고 V8 Reconciliation 에서 다룬다. V4 는 이 한계를 알고 시작한다.
+- **저장 실패는 트랜잭션 안에서 확정한다.** `save()` 만 하면 JPA 는 INSERT 를 커밋 시점까지 미루고, UNIQUE 위반은 메서드가 끝난 뒤에 터진다. 그러면 메서드 안의 보상 코드는 실행되지 않는다. `saveAndFlush()` 로 INSERT 를 메서드 안에서 실행해 실패를 그 자리에서 잡는다.
+- **보상은 실패 원인에 따라 다르다.** 되돌려야 하는 것은 "Redis 가 승인했는데 DB 에 반영되지 않은 것" 뿐이다.
+
+| 실패 | DB 상태 | 보상 | 응답 |
+|---|---|---|---|
+| DB 장애, 그 밖의 롤백 | 행 없음 | `INCR stock`, `SREM issued userId` | 예외 그대로 전파 |
+| UNIQUE 위반 | 행이 이미 있음 | `INCR stock` 만 | `DUPLICATE_ISSUE` (409) |
+
+`INCR stock` 이 양쪽에 다 있는 이유는 재고의 정의가 `stock = total_quantity - count(coupon_issue)` 이기 때문이다. UNIQUE 위반에서는 `count` 가 늘지 않았는데 재고만 줄었으므로 되돌린다.
+
+UNIQUE 위반에서 `SREM` 까지 하면 안 된다. 그 사용자는 DB 상 실제 보유자인데 `issued` 에서 사라지므로, 재시도할 때마다 다시 승인받고 다시 INSERT 에 실패하는 루프에 빠진다. `SCARD issued = count(coupon_issue)` 검증도 깨진다.
+
+UNIQUE 위반은 정상 흐름에서 나오지 않는다. 나온다면 Redis `issued` 가 DB 보다 뒤처졌다는 신호이므로 경고 로그를 남긴다.
+
+이 보상은 "최선의 노력"이다. Redis 는 성공했는데 DB 저장과 보상이 모두 실패하면 두 저장소가 어긋난다. 이 상황은 로드맵의 "실험: Redis 성공 후 DB 실패" 에서 재현하고 V8 Reconciliation 에서 다룬다. V4 는 이 한계를 알고 시작한다.
 
 ### `coupon.remaining_quantity` 의 의미 변화
 
@@ -213,6 +247,7 @@ V4 부터 실시간 재고는 Redis `stock` 키에 있고, DB `coupon.remaining_
 
 - `coupon.service.v4.V4CouponIssueService`, `@ConditionalOnProperty(coupon.issue.version = v4)`.
 - Lua 스크립트 빈: `DefaultRedisScript<Long>` 을 `ClassPathResource("redis/issue-coupon.lua")` 로 만드는 `@Configuration`. 스크립트 로드는 V4 전용이므로 `coupon.service.v4` 패키지 안에 둔다.
+- 키 이름은 `V4RedisKeys` 한 곳에 둔다. 발급 서비스와 테스트가 같은 규칙을 보게 하려는 것이다.
 - Redis 접근은 `StringRedisTemplate`. Spring Boot 자동 구성을 쓰고 `spring.data.redis.host`, `port` 만 설정한다.
 - `management.health.redis.enabled` 는 V4 를 켤 때 `true` 로 되돌린다.
 - 로컬 Redis 는 Docker Desktop 으로 띄운다. README "로컬 실행" 에 추가한다.
@@ -227,14 +262,25 @@ docker run -d --name coupon-redis -p 6379:6379 redis:7
 
 - `V4CouponIssueConcurrencyTest`: 기존 `CouponIssueConcurrencyTestBase` 를 그대로 상속한다. 단, 베이스가 `remaining_quantity` 로 불변식을 검증하므로 V4 에서는 그 검증이 맞지 않는다. 베이스의 잔여 수량 조회를 버전별로 바꿀 수 있게 손보거나, V4 테스트가 Redis `stock` 을 읽도록 한다. 어느 쪽이든 "발급 수 == 전체 - 잔여" 의 잔여는 Redis 값이어야 한다.
 - `V4CouponIssueServiceTest`: 순차 시나리오. 중복, 매진, 기간 전후, 없는 쿠폰, 그리고 **V4 전용으로 미초기화 쿠폰의 첫 발급**(지연 초기화)과 **기존 발급 이력이 있는 쿠폰의 초기화**(발급 수를 뺀 재고, issued 집합 복원).
+- 보상 경로는 따로 만든다. `coupon_issue` 에 행을 넣고 `stock` 키만 손으로 만들어 "명단이 DB 보다 뒤처진" 상태를 재현하면 Redis 승인 뒤 UNIQUE 위반이 결정적으로 난다. 재고가 되돌아오는지, `issued` 에 그 사용자가 남는지, 재시도가 DB 까지 가지 않는지를 확인한다.
+
+자동 테스트가 실제로 무엇을 지키는지는 구현을 일부러 망가뜨려 확인했다.
+
+| 설계 결정 | 깨뜨렸을 때 실패하는 테스트 |
+|---|---|
+| 초기화가 `issued` 를 복원한다 | `initializesStockAndIssuedUsersFromIssueHistory` |
+| UNIQUE 위반에서 `SREM` 하지 않는다 | `keepsIssuedUserAndRestoresStockOnUniqueViolation` |
+| `issued` 복원을 `stock` 생성보다 먼저 한다 | **없음** |
+
+초기화 순서를 뒤집어도 순차 테스트는 전부 통과한다. 단일 스레드에서는 두 명령이 재시도 전에 모두 끝나기 때문이다. 이 결정은 두 명령 사이에 다른 요청이 끼어드는 창에서만 드러나고, 그 창을 결정적으로 재현하려면 코드에 지연을 주입해야 한다. 지금은 넣지 않고 한계로 적어 둔다.
 - 테스트는 실행 후 Redis 키를 지운다. DB 정리와 같은 위치(`@AfterEach`)에서 한다.
 
 ### 구현 순서
 
 1. Lua 스크립트와 로드 설정
 2. `Coupon` 기간 검증 메서드
-3. `V4CouponIssueService` 정상 경로 (초기화 포함)
-4. 오류 경로와 보상
+3. `V4CouponIssueService` 정상 경로 (발급자 userId 목록 조회 메서드와 초기화 포함)
+4. 오류 경로와 원인별 보상
 5. 테스트 두 개
 6. README 로컬 실행, CI Redis 서비스, `docs/api.md` 주석
 7. 1부와 같은 조건으로 부하 실험, 2부 기록
