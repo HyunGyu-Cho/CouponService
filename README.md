@@ -239,17 +239,26 @@ k6 run -e COUPON_ID=1 -e RATE=200 -e DURATION=30s --log-output=stdout load-tests
 
 DB 비밀번호는 환경변수 `DB_PASSWORD`가 있으면 그것을 쓰고 없으면 물어봅니다.
 
+커넥션 풀 크기를 바꿔가며 병목을 가를 때는 애플리케이션을 띄울 때 `DB_POOL_SIZE`를 줍니다. 기본값은 HikariCP 기본과 같은 10입니다. `application.properties`에 값을 직접 박으면 테스트에도 적용돼, 테스트 컨텍스트마다 풀이 생기면서 MariaDB `max_connections`를 넘겨 컨텍스트 로딩이 실패합니다.
+
+```powershell
+$env:DB_POOL_SIZE="50"
+./gradlew.bat bootRun
+```
+
+실험은 다른 부하와 겹치지 않을 때 시작합니다. 시작 전 `snapshot.ps1`의 `active=0 pending=0`으로 앱이 한가한지 확인하고, 직전 실행이 끝나기 전에 다음 실행을 걸지 않습니다. 앞 실행이 아직 돌고 있으면 같은 `USER_ID_OFFSET` 구간을 다시 쓰게 되어 요청 대부분이 중복 발급으로 튕깁니다. 턴 종료 자동 검사(`gradlew test`)와도 겹치면 안 되며, 겹쳤는지는 `build/test-results/test/*.xml`의 `timestamp`로 확인합니다.
+
 `-CouponId`를 준 사후 검증은 잔여 수량을 어디서 읽을지 스스로 정합니다. Redis에 그 쿠폰의 재고 키가 있으면 그것을(`remaining=...(redis)`), 없으면 DB의 `remaining_quantity`를(`remaining=...(db)`) 씁니다. V4는 발급 경로에서 DB 잔여 수량을 갱신하지 않으므로 DB 값으로 계산하면 실제로는 멀쩡한데 어긋난 것처럼 보이기 때문입니다. V1~V3로 발급한 쿠폰은 Redis에 키가 없어 예전과 똑같이 동작합니다. V4 쿠폰에는 발급 사용자 집합의 크기(`issued_users`)와 발급 이력 수의 차이(`issued_gap`)도 함께 찍습니다. Redis 접근은 `redis-cli`가 PATH에 있으면 그것을, 없으면 `docker exec coupon-redis redis-cli`를 씁니다.
 
 ## 현재 진행 상태
 
-V1 동시성 문제 재현, V2 비관적 락, V3 조건부 Atomic UPDATE까지 구현과 부하 실험을 완료했습니다.
-V3 설계와 실험 결과는 다음 문서에 기록했습니다.
+V1 동시성 문제 재현, V2 비관적 락, V3 조건부 Atomic UPDATE, V4 Redis Lua 원자 발급까지 구현과 부하 실험을 완료했습니다.
+V4 설계와 실험 결과는 다음 문서에 기록했습니다.
 
-- [V3 개발 가이드](docs/v3/development-guide.md)
-- [V3 부하 테스트 결과](docs/v3/load-test-result.md)
+- [V4 개발 가이드](docs/v4/development-guide.md)
+- [V4 부하 테스트 결과](docs/v4/load-test-result.md)
 
-이전 단계 문서: [V1 개발 가이드](docs/v1/development-guide.md), [V1 부하 테스트 결과](docs/v1/load-test-result.md), [V2 개발 가이드](docs/v2/development-guide.md), [V2 부하 테스트 결과](docs/v2/load-test-result.md)
+이전 단계 문서: [V1 개발 가이드](docs/v1/development-guide.md), [V1 부하 테스트 결과](docs/v1/load-test-result.md), [V2 개발 가이드](docs/v2/development-guide.md), [V2 부하 테스트 결과](docs/v2/load-test-result.md), [V3 개발 가이드](docs/v3/development-guide.md), [V3 부하 테스트 결과](docs/v3/load-test-result.md)
 
 완료:
 
@@ -267,34 +276,34 @@ V3 설계와 실험 결과는 다음 문서에 기록했습니다.
 - k6 스크립트의 응답 원인별 분리 집계(201, 409 매진, 409 중복, 5xx, 네트워크 오류)와 환경변수 VU 수
 - V2·V3 동일 조건 비교: 100 VU에서 V3 p95 273~310ms, V2 485ms, 6회 실행 모두 `consistency_gap` 0
 - 1,000 VU에서 V2 실험의 원인 미상 "unexpected"가 TCP 연결 거절임을 분리 집계로 확인
+- V4 지속 도착률 실험으로 V3의 `coupon` 행 경합을 재현. 단일 쿠폰 동기 발급이 초당 약 1,200건에서 포화하고 p95가 7ms에서 790ms로 뜀
+- V4 Redis Lua 원자 발급: 중복 확인·재고 확인·재고 감소·사용자 등록을 스크립트 하나로 묶어 발급 경로에서 `coupon` 행 갱신 제거
+- V4 지연 초기화: `issued` 복원을 먼저 하고 `stock` 키를 마지막에 만들어, 키의 존재 자체가 초기화 완료 표시가 되게 함
+- V4 저장 실패 보상을 원인별로 분리: UNIQUE 위반은 재고만 되돌리고 `issued`의 실제 보유자는 지우지 않음
+- V4 동시성·순차 테스트와, 구현을 일부러 망가뜨려 각 테스트가 지키는 범위를 확인한 변이 실험
+- 동시성 테스트 본체를 버전별로 열어 V4만 Redis 재고를 읽게 함. V1~V3 테스트는 그대로
+- 사후 검증 스크립트가 Redis 재고 키의 유무로 잔여 수량을 읽을 곳을 스스로 정함
+- V4 실험 결과: 같은 날 V3 대비 행 잠금 대기 0회(V3는 800 req/s에서 요청의 99.97%), 400 req/s에서 p95 36.76ms → 13ms. 처리율은 늘지 않음
 
-V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`으로 보존했고, V3는 `v3-atomic-update` 태그를 만들 차례입니다.
+V4 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessimistic-lock`, `v3-atomic-update`로 보존했고, V4는 `v4-redis-atomic` 태그를 만들 차례입니다.
 
 보류:
 
 - 1,000 VU 순간 연결에서 발생하는 TCP 연결 거절의 원인 분석과 HTTP 진입 용량 조정. Rate Limit과 Virtual Waiting Room 단계에서 다룹니다.
-- DB Lock Wait와 커넥션 풀 점유 수치의 수집. DB 경합을 다시 다룰 때 Actuator 지표로 기록합니다.
-
-진행 중 (V4, 문제 재현 완료·가설 확정, 발급 경로 구현 완료, 검증 전):
-
-- V3에 남은 문제인 같은 쿠폰 행에 대한 DB 경합을 지속 도착률 실험으로 재현했습니다. 이 환경에서 단일 쿠폰 동기 발급은 초당 약 1,200건에서 포화되고 p95가 7ms에서 790ms로 뜁니다. 포화 시 커넥션 시간의 절반 이상이 행 잠금 대기였습니다.
-- 정상 범위에서도 실행마다 한 번, 원인 미상의 1~2초 정지가 Tomcat 스레드 전부를 행 잠금 뒤에 쌓이게 했습니다.
-- 재현 조건, 관찰 지표, 판단은 [V4 개발 가이드](docs/v4/development-guide.md)와 [V4 부하 테스트 결과](docs/v4/load-test-result.md) 1부에 있습니다.
-- 관측 장치를 추가했습니다. Actuator metrics 노출, 지속 도착률 k6 스크립트, 실험 전후 상태 기록 스크립트.
-- 가설: 재고 감소와 중복 확인을 Redis Lua 원자 연산으로 옮겨 `coupon` 행 갱신을 발급 경로에서 제거하면 포화 지점이 올라간다.
-- 발급 경로와 자동 테스트를 구현했습니다. 중복 확인·재고 확인·재고 감소·사용자 등록을 묶은 Lua 스크립트, `V4CouponIssueService`, 기간만 검증하는 `Coupon.validateIssuablePeriod()`, 초기화용 `findUserIdsByCouponId()`, V1~V3와 같은 시나리오를 도는 동시성 테스트와 순차 테스트 9개.
-- 동시성 테스트 본체는 잔여 수량을 읽는 곳과 버전별 뒷정리를 하위 클래스가 바꿀 수 있게 열었습니다. V4만 Redis 를 읽고 V1~V3 테스트는 그대로입니다.
-- 구현을 일부러 망가뜨려 각 테스트가 무엇을 지키는지 확인했습니다. 초기화 순서만은 순차 테스트로 덮이지 않으며, 그 한계는 [V4 개발 가이드](docs/v4/development-guide.md) "테스트"에 적었습니다.
-- 설계 초안에서 두 곳을 고친 뒤 구현했습니다. 지연 초기화는 `issued` 집합을 먼저 복원하고 `stock` 키를 마지막에 만들어 그 키가 초기화 완료 표시가 되게 했고, DB 저장 실패 보상은 UNIQUE 위반과 그 밖의 실패를 갈랐습니다. 근거는 [V4 개발 가이드](docs/v4/development-guide.md)에 있습니다.
+- V4가 800 req/s에서 막히는 새 병목의 정체. 커넥션 풀도(풀을 10에서 50으로 늘려도 처리율이 오르지 않음) Redis 왕복도(중앙값 0.47ms) 아님을 확인했지만 무엇인지는 밝히지 못했습니다. GC 로그, CPU 사용률, 커밋 fsync를 함께 기록하면 좁힐 수 있습니다.
+- V4 지연 초기화의 순서(`issued` 먼저, `stock` 마지막)는 순차 테스트로 덮이지 않습니다. 동시 요청이 끼어드는 창을 결정적으로 재현하려면 코드에 지연을 주입해야 합니다.
+- Redis 키의 수명. TTL을 두지 않았으며 만료 정책은 V9 Cache에서 정합니다.
+- 한 대에서 애플리케이션, MariaDB, Redis, k6를 모두 돌리는 실험 환경의 한계. V4를 재려면 Docker가 켜져 있어야 하는데 Docker를 켜는 것 자체가 환경을 바꿉니다. 비교는 같은 날 같은 세션 안에서만 성립합니다.
 
 아직 구현하지 않음:
 
-- V4 부하 실험, 그리고 그 이후의 모든 단계
+- 로드맵의 "실험: Redis 성공 후 DB 실패"와 V5 Kafka 이후의 모든 단계
 
 ## 다음 작업
 
-1. 1부와 같은 조건(도착률 400, 800, 1,600)으로 V4를 측정해 `docs/v4/load-test-result.md` 2부에 기록하고 "결과"와 "판단"을 채웁니다.
-2. "결과"와 "판단"을 채운 뒤 `scripts/check-stage.sh v4`를 통과시키고 `v4-redis-atomic` 태그를 만듭니다.
+1. `scripts/check-stage.sh v4`를 통과시키고 `v4-redis-atomic` 태그를 만듭니다.
+2. 로드맵의 "실험: Redis 성공 후 DB 실패"로 두 저장소가 어긋나는 상황을 재현합니다. V4가 "최선의 노력" 보상으로 남겨 둔 구멍입니다.
+3. V5 Kafka 비동기 발급으로 넘어갑니다.
 
 ## 검사 장치
 
