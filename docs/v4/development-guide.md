@@ -237,7 +237,7 @@ V4 부터 실시간 재고는 Redis `stock` 키에 있고, DB `coupon.remaining_
 
 - 정합성 불변식의 정본은 `발급 수 = count(coupon_issue)` 와 `Redis stock = total_quantity - 발급 수` 다.
 - `GET /api/coupons/{couponId}` 의 `remainingQuantity` 는 DB 값이므로 V4 에서는 최신이 아닐 수 있다. 이 사실은 [API 계약](../api.md) 에 적는다. 실시간 값 반영은 V8 대사 또는 V9 캐시에서 정한다.
-- 부하 실험의 사후 검증 SQL 도 V4 용으로 바꾼다: `total_quantity - (GET stock) = count(coupon_issue)`, `SCARD issued = count(coupon_issue)`.
+- 부하 실험의 사후 검증도 V4 용으로 바꿨다. `load-tests/snapshot.ps1` 의 `-CouponId` 는 Redis 재고 키가 있으면 그 값으로 `total_quantity - (GET stock) = count(coupon_issue)` 를, 없으면 예전대로 DB 잔여 수량으로 계산한다. `SCARD issued = count(coupon_issue)` 도 `issued_users`, `issued_gap` 으로 함께 찍는다. 버전을 인자로 받지 않고 키의 존재로 판단하므로 V1~V3 쿠폰은 영향을 받지 않는다.
 
 ### 엔티티 변경
 

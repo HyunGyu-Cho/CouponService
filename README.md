@@ -239,6 +239,8 @@ k6 run -e COUPON_ID=1 -e RATE=200 -e DURATION=30s --log-output=stdout load-tests
 
 DB 비밀번호는 환경변수 `DB_PASSWORD`가 있으면 그것을 쓰고 없으면 물어봅니다.
 
+`-CouponId`를 준 사후 검증은 잔여 수량을 어디서 읽을지 스스로 정합니다. Redis에 그 쿠폰의 재고 키가 있으면 그것을(`remaining=...(redis)`), 없으면 DB의 `remaining_quantity`를(`remaining=...(db)`) 씁니다. V4는 발급 경로에서 DB 잔여 수량을 갱신하지 않으므로 DB 값으로 계산하면 실제로는 멀쩡한데 어긋난 것처럼 보이기 때문입니다. V1~V3로 발급한 쿠폰은 Redis에 키가 없어 예전과 똑같이 동작합니다. V4 쿠폰에는 발급 사용자 집합의 크기(`issued_users`)와 발급 이력 수의 차이(`issued_gap`)도 함께 찍습니다. Redis 접근은 `redis-cli`가 PATH에 있으면 그것을, 없으면 `docker exec coupon-redis redis-cli`를 씁니다.
+
 ## 현재 진행 상태
 
 V1 동시성 문제 재현, V2 비관적 락, V3 조건부 Atomic UPDATE까지 구현과 부하 실험을 완료했습니다.
