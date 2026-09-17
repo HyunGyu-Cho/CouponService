@@ -20,6 +20,14 @@ jobs:
         options: >-
           --health-cmd "healthcheck.sh --connect --innodb_initialized"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      # V4부터 발급 경로에 Redis 가 있다. 기본 발급 버전이 v4 라 컨텍스트만 띄우는 테스트도 필요로 한다.
+      # redis:7 기본값은 maxmemory 0(무제한)이라 축출이 일어나지 않는다. V4 재고 키는 사라지면 안 된다.
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       DB_URL: jdbc:mariadb://localhost:3307/coupon_service
       DB_USERNAME: root
@@ -76,6 +84,14 @@ jobs:
         ports: ["3307:3306"]
         options: >-
           --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      # V4부터 발급 경로에 Redis 가 있다. 기본 발급 버전이 v4 라 컨텍스트만 띄우는 테스트도 필요로 한다.
+      # redis:7 기본값은 maxmemory 0(무제한)이라 축출이 일어나지 않는다. V4 재고 키는 사라지면 안 된다.
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       DB_URL: jdbc:mariadb://localhost:3307/coupon_service

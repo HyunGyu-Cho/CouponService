@@ -253,7 +253,7 @@ V4 부터 실시간 재고는 Redis `stock` 키에 있고, DB `coupon.remaining_
 - 로컬 Redis 는 Docker Desktop 으로 띄운다. README "로컬 실행" 에 추가한다.
 
 ```bash
-docker run -d --name coupon-redis -p 6379:6379 redis:7
+docker run -d --name coupon-redis -p 6379:6379 redis:7 redis-server --maxmemory-policy noeviction
 ```
 
 - CI 워크플로의 `build-test` 와 `stage` job 에 `redis:7` 서비스를 추가한다.

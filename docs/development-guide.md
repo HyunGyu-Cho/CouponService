@@ -113,7 +113,7 @@ Database    -> 최종 데이터 무결성
 모든 발급 구현은 `CouponIssueUseCase`를 구현하며 다음 설정으로 하나만 활성화한다.
 
 ```properties
-coupon.issue.version=v3
+coupon.issue.version=v4
 ```
 
 - 구현 클래스는 `coupon.service.vN.VNCouponIssueService`에 두고 `@ConditionalOnProperty`로 설정값과 연결한다.

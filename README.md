@@ -180,16 +180,28 @@ $env:DB_PASSWORD="MariaDB 비밀번호"
 ./gradlew.bat bootRun
 ```
 
-발급 구현 버전은 `application.properties`의 `coupon.issue.version`(`v1`, `v2`, `v3`)으로 선택합니다.
-저장소의 기본값은 현재 진행 단계에 맞춰 `v3`입니다. V2 비교 실험처럼 다른 버전을 실행할 때는 값을 바꾸거나 실행 시 덮어씁니다.
+V4부터는 Redis도 필요합니다. Docker Desktop으로 띄웁니다.
+
+```bash
+docker run -d --name coupon-redis -p 6379:6379 redis:7 redis-server --maxmemory-policy noeviction
+```
+
+`noeviction`을 지정하는 이유는 V4의 재고가 Redis 키 하나에 들어 있기 때문입니다. 메모리가 부족할 때 Redis가 그 키를 임의로 버리면, 이미 승인돼 저장 중인 발급이 있는 채로 재고가 다시 계산돼 수치가 어긋납니다. 기본값이기도 하지만 전제를 명시해 둡니다.
+
+기본 접속 정보는 `localhost:6379`이며 `spring.data.redis.host`, `spring.data.redis.port`로 바꿉니다.
+
+발급 구현 버전은 `application.properties`의 `coupon.issue.version`(`v1`, `v2`, `v3`, `v4`)으로 선택합니다.
+저장소의 기본값은 현재 진행 단계에 맞춰 `v4`입니다. V3 비교 실험처럼 다른 버전을 실행할 때는 값을 바꾸거나 실행 시 덮어씁니다.
 
 ```powershell
-$env:COUPON_ISSUE_VERSION="v2"
+$env:COUPON_ISSUE_VERSION="v3"
 ./gradlew.bat bootRun
 ```
 
+`v1`, `v2`, `v3`은 Redis 없이 돌아갑니다. `v4`는 Redis가 켜져 있어야 합니다.
+
 Flyway는 스키마 검증과 마이그레이션에 사용하며 Batch 자동 실행은 비활성화되어 있습니다.
-Redis와 Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.
+Kafka는 아직 실제 발급 흐름에 사용하지 않습니다.
 
 ### 부하 테스트 실행
 
@@ -275,12 +287,12 @@ V3 완료. 완료 단계의 코드 상태는 Git 태그 `v1-baseline`, `v2-pessi
 
 아직 구현하지 않음:
 
-- Redis 실행·CI 설정, V4 부하 실험, 그리고 그 이후의 모든 단계
+- V4 부하 실험, 그리고 그 이후의 모든 단계
 
 ## 다음 작업
 
-1. 로컬 Redis 실행 방법을 README "로컬 실행"에, Redis 서비스를 CI에 추가하고, `coupon.issue.version` 기본값과 `management.health.redis.enabled`를 V4에 맞춥니다. 선택 가능한 버전 목록에 `v4`를 더합니다.
-2. 1부와 같은 조건(도착률 400, 800, 1,600)으로 V4를 측정해 `docs/v4/load-test-result.md` 2부에 기록하고 "결과"와 "판단"을 채웁니다.
+1. 1부와 같은 조건(도착률 400, 800, 1,600)으로 V4를 측정해 `docs/v4/load-test-result.md` 2부에 기록하고 "결과"와 "판단"을 채웁니다.
+2. "결과"와 "판단"을 채운 뒤 `scripts/check-stage.sh v4`를 통과시키고 `v4-redis-atomic` 태그를 만듭니다.
 
 ## 검사 장치
 
